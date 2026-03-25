@@ -34,21 +34,29 @@ def get_support_points(points, step, grid_resolution):
     x = points[:, 0]
     y = points[:, 1]
     z = points[:, 2]
-    x_floor = (x // step[0]).long()
-    y_floor = (y // step[1]).long()
-    z_floor = (z // step[2]).long()
-    x_support_indices = torch.vstack(
-        (x_floor, torch.clamp(x_floor + 1, max=grid_resolution[0] - 1))
-    )
-    y_support_indices = torch.vstack(
-        (y_floor, torch.clamp(y_floor + 1, max=grid_resolution[1] - 1))
-    )
-    z_support_indices = torch.vstack(
-        (z_floor, torch.clamp(z_floor + 1, max=grid_resolution[2] - 1))
-    )
-    x_support_indices[0, x_support_indices[0] == x_support_indices[1]] -= 1
-    y_support_indices[0, y_support_indices[0] == y_support_indices[1]] -= 1
-    z_support_indices[0, z_support_indices[0] == z_support_indices[1]] -= 1
+
+    # x_floor = (x // step[0]).long()
+    # y_floor = (y // step[1]).long()
+    # z_floor = (z // step[2]).long()
+    # x_support_indices = torch.vstack(
+    #     (x_floor, torch.clamp(x_floor + 1, max=grid_resolution[0] - 1))
+    # )
+    # y_support_indices = torch.vstack(
+    #     (y_floor, torch.clamp(y_floor + 1, max=grid_resolution[1] - 1))
+    # )
+    # z_support_indices = torch.vstack(
+    #     (z_floor, torch.clamp(z_floor + 1, max=grid_resolution[2] - 1))
+    # )
+    # x_support_indices[0, x_support_indices[0] == x_support_indices[1]] -= 1
+    # y_support_indices[0, y_support_indices[0] == y_support_indices[1]] -= 1
+    # z_support_indices[0, z_support_indices[0] == z_support_indices[1]] -= 1
+
+    x_floor = torch.clamp((x // step[0]).long(), min=0, max=grid_resolution[0] - 2)
+    y_floor = torch.clamp((y // step[1]).long(), min=0, max=grid_resolution[1] - 2)
+    z_floor = torch.clamp((z // step[2]).long(), min=0, max=grid_resolution[2] - 2)
+    x_support_indices = torch.vstack((x_floor, x_floor + 1))
+    y_support_indices = torch.vstack((y_floor, y_floor + 1))
+    z_support_indices = torch.vstack((z_floor, z_floor + 1))
     return x, y, z, x_support_indices, y_support_indices, z_support_indices
 
 
@@ -228,13 +236,18 @@ def plot_fields(fields, validation_points, train=False):
             ),
             title=f"{field[0]}",
         )
-
+        output_dir = "../run"
         # Save as HTML (interactive)
+        # if train:
+        #     fig.write_html(f"../run/{field[0]}_train.html")
+        # else:
+        #     fig.write_html(f"../run/{field[0]}.html")
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
         if train:
-            fig.write_html(f"../run/{field[0]}_train.html")
+            fig.write_html(os.path.join(output_dir, f"{field[0]}_train.html"))
         else:
-            fig.write_html(f"../run/{field[0]}.html")
-
+            fig.write_html(os.path.join(output_dir, f"{field[0]}.html"))
 
 def plot_aginast_data(folder_path, vx_pred, vy_pred, vz_pred, p_pred, T_pred):
     vx = np.load(os.path.join(folder_path, "vel_x.npy"))

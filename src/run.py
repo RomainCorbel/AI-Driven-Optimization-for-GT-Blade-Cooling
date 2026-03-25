@@ -5,6 +5,7 @@ from utils import *
 from spline_pinn import *
 from pinn import *
 
+
 torch.set_default_dtype(torch.float64)
 
 parser = argparse.ArgumentParser(description="Process model type")
