@@ -41,8 +41,6 @@ if not debug:
     run = wandb.init(
         # set the wandb project where this run will be logged
         project=Full_Project_name,
-        entity="sathvikbhagavan-epfl",
-        # track hyperparameters and run metadata
         config={
             "optimizer": "LBFGS",
             "architecture": "Unet",
@@ -251,13 +249,14 @@ for epoch in range(epochs):
         )
 
         fields = [
-            ("vx", validation_vx),
-            ("vy", validation_vy),
-            ("vz", validation_vz),
-            ("p", validation_p),
-            ("temp", validation_T),
+            ("vx", validation_vx.cpu().detach().numpy()),
+            ("vy", validation_vy.cpu().detach().numpy()),
+            ("vz", validation_vz.cpu().detach().numpy()),
+            ("p", validation_p.cpu().detach().numpy()),
+            ("temp", validation_T.cpu().detach().numpy()),
         ]
-        plot_fields(fields, validation_points)
+
+        plot_fields(fields, validation_points.cpu().detach().numpy())
 
         if not debug:
             wandb.log(

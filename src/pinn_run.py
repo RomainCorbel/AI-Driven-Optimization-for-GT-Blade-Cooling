@@ -1,3 +1,4 @@
+# Notes: should be run from the `src/` folder using `python pinn_run.py`
 import trimesh
 import numpy as np
 import random
@@ -388,7 +389,7 @@ for epoch in range(epochs):
         ("p", validation_fields[:, 3].cpu().detach().numpy()),
         ("T", validation_fields[:, 4].cpu().detach().numpy() * 1000),
     ]
-    plot_fields(validation_fields, validation_points)
+    plot_fields(validation_fields, validation_points.cpu().detach().numpy())
 
     if not debug:
         wandb.log(
