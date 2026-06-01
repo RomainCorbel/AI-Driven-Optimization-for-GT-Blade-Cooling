@@ -7,7 +7,6 @@ Visualisation interactive de la géométrie de l'aube GT avec les 4 labels :
 
 Ouvre le fichier HTML généré dans un navigateur pour une vue 3D interactive.
 """
-
 import os
 import trimesh
 import numpy as np
@@ -19,15 +18,14 @@ OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "..", "run", "geometry_lab
 
 # ── Couleurs et opacités par label ──────────────────────────────────────────
 LABELS = {
-    0: dict(name="Label 0 — Intérieur",  color="#64B5F6", opacity=0.30),
-    1: dict(name="Label 1 — Entrée (inlet)",  color="#1E88E5", opacity=0.90),
-    2: dict(name="Label 2 — Parois (walls)",  color="#FB8C00", opacity=0.30),
-    3: dict(name="Label 3 — Sortie (outlet)", color="#E53935", opacity=0.90),
+    0: dict(name="Label 0 — Inside",  color="#64B5F6", opacity=0.30),
+    1: dict(name="Label 1 — Inlet",  color="#1E88E5", opacity=0.90),
+    2: dict(name="Label 2 — Walls",  color="#FB8C00", opacity=0.30),
+    3: dict(name="Label 3 — Outlet", color="#E53935", opacity=0.90),
 }
 
 
 def classify_faces(obj: trimesh.Trimesh):
-    """Sépare les faces du maillage STL en inlet / outlet / walls."""
     threshold = 1e-5
     x_max = obj.vertices[:, 0].max()
 
@@ -45,7 +43,6 @@ def classify_faces(obj: trimesh.Trimesh):
 
 
 def mesh_trace(obj: trimesh.Trimesh, face_indices: list, label: int) -> go.Mesh3d:
-    """Crée un trace Plotly Mesh3d coloré pour un groupe de faces."""
     cfg = LABELS[label]
     sub = obj.submesh([face_indices], only_watertight=False)[0]
     v, f = sub.vertices, sub.faces
@@ -90,16 +87,13 @@ def interior_scatter(obj: trimesh.Trimesh, n: int = 8_000) -> go.Scatter3d:
 
 
 def main():
-    print("Chargement du maillage STL …")
     obj = trimesh.load(STL_PATH)
 
     print("Classification des faces …")
     inlet_idx, outlet_idx, wall_idx = classify_faces(obj)
-    print(f"  Entrée  : {len(inlet_idx):>6} faces")
-    print(f"  Sortie  : {len(outlet_idx):>6} faces")
-    print(f"  Parois  : {len(wall_idx):>6} faces")
-
-    print("Échantillonnage de l'intérieur …")
+    print(f"  Inlet  : {len(inlet_idx):>6} faces")
+    print(f"  Outlet  : {len(outlet_idx):>6} faces")
+    print(f"  Walls  : {len(wall_idx):>6} faces")
     traces = [
         interior_scatter(obj),
         mesh_trace(obj, inlet_idx,  1),
@@ -107,34 +101,15 @@ def main():
         mesh_trace(obj, outlet_idx, 3),
     ]
 
-    # ── Flèche indiquant la direction de l'écoulement ────────────────────────
-    x_max = obj.vertices[:, 0].max()
-    y_mid = (obj.vertices[:, 1].min() + obj.vertices[:, 1].max()) / 2
-    z_mid = (obj.vertices[:, 2].min() + obj.vertices[:, 2].max()) / 2
-
-    arrow = go.Scatter3d(
-        x=[x_max * -0.12, x_max * 1.12],
-        y=[y_mid, y_mid],
-        z=[z_mid, z_mid],
-        mode="lines+text",
-        line=dict(color="white", width=3),
-        text=["", "→ écoulement"],
-        textfont=dict(color="white", size=13),
-        showlegend=False,
-        hoverinfo="skip",
-    )
-    traces.append(arrow)
-
-    # ── Mise en page ─────────────────────────────────────────────────────────
     fig = go.Figure(data=traces)
     fig.update_layout(
         title=dict(
-            text="Géométrie aube GT — Labels des conditions aux limites",
+            text="Geometry Labels",
             font=dict(size=18, color="white"),
             x=0.5,
         ),
         scene=dict(
-            xaxis=dict(title="X — direction d'écoulement", color="white",
+            xaxis=dict(title="X — flow direction", color="white",
                        backgroundcolor="rgb(15,15,25)", gridcolor="rgba(255,255,255,0.1)"),
             yaxis=dict(title="Y", color="white",
                        backgroundcolor="rgb(15,15,25)", gridcolor="rgba(255,255,255,0.1)"),
@@ -157,8 +132,6 @@ def main():
 
     os.makedirs(os.path.dirname(os.path.abspath(OUTPUT_PATH)), exist_ok=True)
     fig.write_html(OUTPUT_PATH)
-    print(f"\nFichier HTML généré : {os.path.abspath(OUTPUT_PATH)}")
-    print("Ouvre-le dans ton navigateur pour la vue 3D interactive.")
 
 
 if __name__ == "__main__":
