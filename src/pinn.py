@@ -41,7 +41,7 @@ def init_weights(m):
 
 
 def get_values_and_derivatives(fields, points):
-    vx = fields[:, 0:1]
+    vx = fields[:, 0:1]  # why not fields[:, 0] ? because we want to keep the dimensions for autograd: we want (100, 1) a not (100,)
     vy = fields[:, 1:2]
     vz = fields[:, 2:3]
     p = fields[:, 3:4]
@@ -244,16 +244,18 @@ def get_loss(
     labels,
     p_outlet,
 ):
-    loss_divergence = torch.mean((vx_x + vy_y + vz_z) ** 2)
+    loss_divergence = torch.mean((vx_x + vy_y + vz_z) ** 2) # Continuity equation (incompressibility condition) NABLA.v = 0
 
     mu = dynamic_viscosity(T)
 
-    loss_momentum_x = torch.mean(
-        (
+    loss_momentum_x = torch.mean( # X-momentum conservation (Steady-state, Incompressible Navier-Stokes equations.)
+        (   # advection term (v · nabla v)
             vx[labels == 0] * vx_x[labels == 0]
             + vy[labels == 0] * vx_y[labels == 0]
             + vz[labels == 0] * vx_z[labels == 0]
+            # pressure gradient term (1/rho * nabla p)
             + (1 / rho) * p_x[labels == 0]
+            # diffusion term (mu/rho * nabla^2 v)
             - (mu[labels == 0] / rho)
             * (vx_xx[labels == 0] + vx_yy[labels == 0] + vx_zz[labels == 0])
         )

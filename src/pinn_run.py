@@ -152,7 +152,40 @@ for epoch in range(epochs):
             T_yy,
             T_zz,
         ) = get_values_and_derivatives(train_fields, train_points)
-
+        # print        (
+        #     vx,
+        #     vy,
+        #     vz,
+        #     p,
+        #     T,
+        #     vx_x,
+        #     vx_y,
+        #     vx_z,
+        #     vx_xx,
+        #     vx_yy,
+        #     vx_zz,
+        #     vy_x,
+        #     vy_y,
+        #     vy_z,
+        #     vy_xx,
+        #     vy_yy,
+        #     vy_zz,
+        #     vz_x,
+        #     vz_y,
+        #     vz_z,
+        #     vz_xx,
+        #     vz_yy,
+        #     vz_zz,
+        #     p_x,
+        #     p_y,
+        #     p_z,
+        #     T_x,
+        #     T_y,
+        #     T_z,
+        #     T_xx,
+        #     T_yy,
+        #     T_zz,
+        # )
         (
             loss_divergence,
             loss_momentum_x,
@@ -198,7 +231,15 @@ for epoch in range(epochs):
             train_labels,
             p_outlet,
         )
-
+        # print(loss_divergence,
+        #     loss_momentum_x,
+        #     loss_momentum_y,
+        #     loss_momentum_z,
+        #     loss_outlet_boundary,
+        #     loss_other_boundary,
+        #     loss_heat,
+        #     loss_t_wall_boundary)
+        
         inlet_fields = pinn_model(inlet_points)
 
         loss_inlet_boundary = (

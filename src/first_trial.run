@@ -1,0 +1,14 @@
+#!/bin/bash
+#SBATCH --chdir /home/corbel
+#SBATCH --gres=gpu:1
+#SBATCH --ntasks 1
+#SBATCH --cpus-per-task 1
+#SBATCH --mem 4096
+#SBATCH --time 12:30:00 
+#SBATCH --output /home/corbel/logs/%j.out
+#SBATCH --account=com-304
+#SBATCH --qos=com-304
+
+echo STARTING AT `date`
+python --version
+echo FINISHED at `date`

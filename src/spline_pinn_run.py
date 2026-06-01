@@ -137,12 +137,12 @@ for epoch in range(epochs):
         )
 
         inlet_fields = get_fields(spline_coeff, inlet_points, step, grid_resolution)
-
         loss_inlet_boundary = (
             torch.mean((inlet_fields[0] - vx_inlet_data) ** 2)
             + torch.mean((inlet_fields[1] - vy_inlet_data) ** 2)
             + torch.mean((inlet_fields[2] - vz_inlet_data) ** 2)
-        )
+            )
+
 
         loss_inlet_temp_boundary = torch.mean((inlet_fields[4] - T_inlet) ** 2) / 10**6
 
