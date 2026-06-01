@@ -27,7 +27,7 @@ data_folder = "./preProcessedData/with_T/" + folder + "/"
 Full_Project_name = Project_name + "_" + folder
 
 # Model Hyperparams
-epochs = 100
+epochs = 1 # 100
 hidden_dim = 128
 num_layer = 4
 seed = 42

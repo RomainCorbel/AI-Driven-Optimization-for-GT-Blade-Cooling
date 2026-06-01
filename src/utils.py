@@ -204,9 +204,13 @@ def dynamic_viscosity(T, mu_ref=1.716e-5, T_ref=273.15, S=110.4):
 
 def plot_fields(fields, validation_points, train=False):
     for field in fields:
-        # Convert to numpy for plotting
+        import torch
         points = validation_points
+        if isinstance(points, torch.Tensor):
+            points = points.detach().cpu().numpy()
         scalar_field = field[1]
+        if isinstance(scalar_field, torch.Tensor):
+            scalar_field = scalar_field.detach().cpu().numpy()
 
         # Create a 3D scatter plot using Plotly
         fig = go.Figure(
