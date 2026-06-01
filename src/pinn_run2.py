@@ -1,5 +1,5 @@
 # Notes: should be run from the `src/` folder using `python pinn_run.py`
-# Here, i reduced num_sample to 5k (50k before), but putted it in the for loop, meaning that for each epoch, we are sampling a different set of 5k points from the training data, instead of using a fixed set of 50k points for all epochs. This is a common technique to improve generalization and prevent overfitting to a specific subset of the data. 
+# Here, I reduced num_sample to 5k (50k before), but putted it in the for loop, meaning that for each epoch, we are sampling a different set of 5k points from the training data (5k*100 = 500k of data / 600 k), instead of using a fixed set of 50k points for all epochs. This is a common technique to improve generalization and prevent overfitting to a specific subset of the data. 
 import trimesh
 import numpy as np
 import random
@@ -28,7 +28,7 @@ data_folder = "./preProcessedData/with_T/" + folder + "/"
 Full_Project_name = Project_name + "_" + folder
 
 # Model Hyperparams, no change yet, but might be interesting to put 256 hl, 6 layers
-epochs = 1
+epochs = 100
 hidden_dim = 128
 num_layer = 4
 seed = 42
