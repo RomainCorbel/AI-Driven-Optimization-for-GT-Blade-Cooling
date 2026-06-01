@@ -1,4 +1,5 @@
 # Notes: should be run from the `src/` folder using `python pinn_run.py`
+# Here, i reduced num_sample to 5k (50k before), but putted it in the for loop, meaning that for each epoch, we are sampling a different set of 5k points from the training data, instead of using a fixed set of 50k points for all epochs. This is a common technique to improve generalization and prevent overfitting to a specific subset of the data. 
 import trimesh
 import numpy as np
 import random
@@ -26,8 +27,8 @@ debug = False  # Turn this to "True" if you are debugging the flow and don't wan
 data_folder = "./preProcessedData/with_T/" + folder + "/"
 Full_Project_name = Project_name + "_" + folder
 
-# Model Hyperparams
-epochs = 3 # 100
+# Model Hyperparams, no change yet, but might be interesting to put 256 hl, 6 layers
+epochs = 1
 hidden_dim = 128
 num_layer = 4
 seed = 42
@@ -76,18 +77,37 @@ p_data = torch.tensor(np.load(data_folder + "press.npy")[:, 3])
 p_data = torch.tensor(np.load(data_folder + "press.npy")[:, 3])
 temp_data = torch.tensor(np.load(data_folder + "temp.npy")[:, 3])
 
-# Use data for supervised loss
-num_samples = 50000
-indices = torch.randint(0, data_points.shape[0], (num_samples,))
-sampled_points = data_points[indices]
+# Train/test split on CFD data (500k train, 100k held-out test)
+# OLD fixed sampling (replaced by per-epoch re-sampling inside the loop):
+# num_samples = 50000
+# indices = torch.randint(0, data_points.shape[0], (num_samples,))
+# sampled_points = data_points[indices]
+# vx_sampled_data = vx_data[indices]
+# vy_sampled_data = vy_data[indices]
+# vz_sampled_data = vz_data[indices]
+# p_sampled_data = p_data[indices] / 10**5
+# temp_sampled_data = temp_data[indices]
+# -------------------------------------
+num_samples = 5000
+n_test = 100000
+perm = torch.randperm(data_points.shape[0])
+train_idx = perm[n_test:]
+test_idx  = perm[:n_test]
 
-# Get the corresponding fields
-vx_sampled_data = vx_data[indices]
-vy_sampled_data = vy_data[indices]
-vz_sampled_data = vz_data[indices]
-p_sampled_data = p_data[indices] / 10**5
-temp_sampled_data = temp_data[indices]
+train_data_points = data_points[train_idx]
+train_vx_data     = vx_data[train_idx]
+train_vy_data     = vy_data[train_idx]
+train_vz_data     = vz_data[train_idx]
+train_p_data      = p_data[train_idx] / 10**5
+train_temp_data   = temp_data[train_idx]
 
+test_data_points = data_points[test_idx]
+test_vx_data     = vx_data[test_idx]
+test_vy_data     = vy_data[test_idx]
+test_vz_data     = vz_data[test_idx]
+test_p_data      = p_data[test_idx] / 10**5
+test_temp_data   = temp_data[test_idx]
+# --------------------------------------
 # Load the domain
 obj = trimesh.load("./Baseline_ML4Science.stl")
 
@@ -116,6 +136,15 @@ for epoch in range(epochs):
     train_points, train_labels = sample_points(obj, 30000, 3000, 20000)
     train_points = train_points / 1000
     train_points.requires_grad_(True)
+
+    # Re-sample supervised points from the training set each epoch
+    indices = torch.randint(0, train_data_points.shape[0], (num_samples,))
+    sampled_points    = train_data_points[indices]
+    vx_sampled_data   = train_vx_data[indices]
+    vy_sampled_data   = train_vy_data[indices]
+    vz_sampled_data   = train_vz_data[indices]
+    p_sampled_data    = train_p_data[indices]
+    temp_sampled_data = train_temp_data[indices]
 
     def closure():
         train_fields = pinn_model(train_points)
@@ -424,6 +453,17 @@ for epoch in range(epochs):
         + 20 * validation_loss_t_wall_boundary
     )
 
+    # Held-out test supervised loss (never seen during training)
+    with torch.no_grad():
+        test_fields = pinn_model(test_data_points)
+    test_supervised_loss = (
+        torch.mean((test_fields[:, 0] - test_vx_data) ** 2)
+        + torch.mean((test_fields[:, 1] - test_vy_data) ** 2)
+        + torch.mean((test_fields[:, 2] - test_vz_data) ** 2)
+        + torch.mean((test_fields[:, 3] - test_p_data) ** 2)
+        + torch.mean((test_fields[:, 4] * 1000 - test_temp_data) ** 2) / 10**6
+    )
+
     validation_fields = [
         ("vx", validation_fields[:, 0].cpu().detach().numpy()),
         ("vy", validation_fields[:, 1].cpu().detach().numpy()),
@@ -459,6 +499,7 @@ for epoch in range(epochs):
                     validation_loss_t_wall_boundary.item()
                 ),
                 "Validation Total Loss": np.log10(validation_loss_total.item()),
+                "Test Supervised Loss": np.log10(test_supervised_loss.item()),
             }
         )
 
@@ -472,7 +513,8 @@ for epoch in range(epochs):
         f"Validation Other Boundary Loss: {validation_loss_other_boundary.item()}, "
         f"Validation Heat Loss: {validation_loss_heat.item()}, "
         f"Validation Surface Temperature Boundary Loss: {validation_loss_t_wall_boundary.item()}, "
-        f"Validation Total Loss: {validation_loss_total.item()}"
+        f"Validation Total Loss: {validation_loss_total.item()}, "
+        f"Test Supervised Loss: {test_supervised_loss.item()}"
     )
     optimizer.zero_grad(True)
 
