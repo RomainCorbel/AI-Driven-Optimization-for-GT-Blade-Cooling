@@ -27,7 +27,7 @@ data_folder = "./preProcessedData/with_T/" + folder + "/"
 Full_Project_name = Project_name + "_" + folder
 
 # Model Hyperparams
-epochs = 1 # 100
+epochs = 3 # 100
 hidden_dim = 128
 num_layer = 4
 seed = 42
@@ -95,6 +95,7 @@ obj = trimesh.load("./Baseline_ML4Science.stl")
 pinn_model = PINNs(in_dim=3, hidden_dim=hidden_dim, out_dim=5, num_layer=num_layer).to(
     device
 )
+
 pinn_model.apply(init_weights)
 pinn_model = pinn_model.double()
 
