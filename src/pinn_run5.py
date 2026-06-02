@@ -40,6 +40,14 @@ lr_adam        = 1e-2
 lr_weights     = 1e-2
 lr_decay_rate  = 0.97
 
+# Sampling
+num_samples           = 5000
+n_test                = 1000
+
+n_volume_pts          = 300
+n_outlet_surface_pts  = 30
+n_other_surface_pts   = 200
+
 LOSS_NAMES = [
     "w_divergence",
     "w_momentum_x",
@@ -136,9 +144,6 @@ out_std = torch.stack([
 print(f"Output mean: {out_mean.tolist()}")
 print(f"Output std:  {out_std.tolist()}")
 
-
-num_samples = 50000
-n_test      = 100000
 perm        = torch.randperm(data_points.shape[0])
 train_idx   = perm[n_test:]
 test_idx    = perm[:n_test]
@@ -181,7 +186,7 @@ start_time = time.time()
 training_loss_track   = []
 validation_loss_track = []
 
-validation_points_raw, validation_labels = sample_points(obj, 30000, 3000, 20000)
+validation_points_raw, validation_labels = sample_points(obj, 5000, 500, 3000)
 validation_points = validation_points_raw / 1000
 global_step = 0
 
@@ -314,7 +319,7 @@ for epoch in range(epochs_adam):
 
     val_log = run_validation()
 
-    train_points, train_labels = sample_points(obj, 30000, 3000, 20000)
+    train_points, train_labels = sample_points(obj, n_volume_pts, n_outlet_surface_pts, n_other_surface_pts)
     train_points = train_points / 1000
     train_points.requires_grad_(True)
 
