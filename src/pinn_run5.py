@@ -38,7 +38,8 @@ num_layer      = 4
 seed           = 42
 lr_adam        = 1e-2
 lr_weights     = 1e-2
-lr_decay_rate  = 0.97
+lr_final       = 1e-5
+lr_decay_rate  = (lr_final / lr_adam) ** (1.0 / epochs_adam)
 
 # Sampling
 num_samples           = 1000
@@ -81,6 +82,7 @@ if not debug:
             "epochs_adam": epochs_adam,
             "lr_adam": lr_adam,
             "lr_weights": lr_weights,
+            "lr_final": lr_final,
             "lr_decay_rate": lr_decay_rate,
             "adam_betas": (0.99, 0.999),
             "seed": seed,
