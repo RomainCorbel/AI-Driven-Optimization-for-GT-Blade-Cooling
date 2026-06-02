@@ -24,7 +24,7 @@ from utils import *
 from constants import *
 
 folder = "dp11"
-Project_name = "PINNs-baseline_with_heat_adaptive_weights_only_ADAM"
+Project_name = "PINNs-5"
 device = "cuda"
 debug = False
 
@@ -32,7 +32,7 @@ data_folder = "./preProcessedData/with_T/" + folder + "/"
 Full_Project_name = Project_name + "_" + folder
 
 # Hyperparams
-epochs_adam    = 200
+epochs_adam    = 500
 hidden_dim     = 128
 num_layer      = 4
 seed           = 42
@@ -41,12 +41,13 @@ lr_weights     = 1e-2
 lr_decay_rate  = 0.97
 
 # Sampling
-num_samples           = 5000
-n_test                = 1000
+num_samples           = 1000
+n_test                = 500
 
-n_volume_pts          = 300
-n_outlet_surface_pts  = 30
-n_other_surface_pts   = 200
+n_volume_pts          = 2000
+n_outlet_surface_pts  = 200
+n_other_surface_pts   = 800
+n_inlet_pts           = 200
 
 LOSS_NAMES = [
     "w_divergence",
@@ -87,6 +88,7 @@ if not debug:
             "num_layers": num_layer,
             "input_standardization": True,
             "output_standardization": True,
+            "n_inlet_pts": n_inlet_pts,
         },
     )
 
@@ -98,10 +100,11 @@ torch.set_default_device(device)
 print(f"Using device: {device}")
 
 inlet = np.load(data_folder + "vel_x_inlet.npy")
-inlet_points   = torch.tensor(inlet[:, 0:3])
-vx_inlet_data  = torch.tensor(np.load(data_folder + "vel_x_inlet.npy")[:, 3])
-vy_inlet_data  = torch.tensor(np.load(data_folder + "vel_y_inlet.npy")[:, 3])
-vz_inlet_data  = torch.tensor(np.load(data_folder + "vel_z_inlet.npy")[:, 3])
+inlet_perm    = np.random.permutation(inlet.shape[0])[:n_inlet_pts]
+inlet_points  = torch.tensor(inlet[inlet_perm, 0:3])
+vx_inlet_data = torch.tensor(np.load(data_folder + "vel_x_inlet.npy")[inlet_perm, 3])
+vy_inlet_data = torch.tensor(np.load(data_folder + "vel_y_inlet.npy")[inlet_perm, 3])
+vz_inlet_data = torch.tensor(np.load(data_folder + "vel_z_inlet.npy")[inlet_perm, 3])
 
 data_points = torch.tensor(np.load(data_folder + "vel_x.npy")[:, 0:3])
 vx_data     = torch.tensor(np.load(data_folder + "vel_x.npy")[:, 3])
