@@ -1,12 +1,14 @@
 # Notes: should be run from the `src/` folder using `python pinn_run4.py`
-# Adaptive loss balancing via inverse-EMA weighting.
-# Each loss term is re-weighted as w_i = mean_ema / ema_i, so terms that are
-# currently large get down-weighted and terms that are small get up-weighted.
-# This drives ALL losses toward zero simultaneously without manual tuning.
+# Two-stage training: Adam (global exploration) → L-BFGS (fine-tuning).
+# L-BFGS uses fixed collocation points to keep the loss landscape consistent
+# across line-search evaluations, avoiding the loss spikes seen with resampling.
+# Adaptive loss weighting: 11 learnable scalars w_i trained alongside the PINN.
+# Total loss = sum(w_i * l_i) - sum(w_i)  (regularization prevents w_i → 0).
 import trimesh
 import numpy as np
 import random
 import torch
+import torch.nn as nn
 
 torch.set_default_dtype(torch.float64)
 from utils import *
@@ -21,7 +23,7 @@ from utils import *
 from constants import *
 
 folder = "dp11"
-Project_name = "PINNs-baseline_with_heat"
+Project_name = "PINNs-baseline_with_heat_adaptive_weights"
 device = "cuda"
 debug = False
 
@@ -29,14 +31,30 @@ data_folder = "./preProcessedData/with_T/" + folder + "/"
 Full_Project_name = Project_name + "_" + folder
 
 # Hyperparams
-epochs_adam  = 200
+epochs_adam  = 50
 epochs_lbfgs = 100
 run_lbfgs    = False
 hidden_dim   = 128
 num_layer    = 4
 seed         = 42
-lr_adam      = 1e-3
-ema_alpha    = 0.9   # EMA decay for adaptive weighting (higher = slower adaptation)
+lr_adam      = 1e-2
+lr_weights   = 1e-3
+lr_decay_rate  = 0.80
+lr_decay_steps = 400
+
+LOSS_NAMES = [
+    "w_divergence",
+    "w_momentum_x",
+    "w_momentum_y",
+    "w_momentum_z",
+    "w_inlet_boundary",
+    "w_outlet_boundary",
+    "w_other_boundary",
+    "w_supervised",
+    "w_heat",
+    "w_inlet_temp_boundary",
+    "w_t_wall_boundary",
+]
 
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 repo = Repo(parent_dir)
@@ -50,11 +68,13 @@ if not debug:
             "epochs_adam": epochs_adam,
             "epochs_lbfgs": epochs_lbfgs,
             "lr_adam": lr_adam,
+            "lr_weights": lr_weights,
+            "lr_decay_rate": lr_decay_rate,
+            "lr_decay_steps": lr_decay_steps,
+            "adam_betas": (0.99, 0.999),
             "seed": seed,
             "hidden_dim": hidden_dim,
             "num_layers": num_layer,
-            "loss_balancing": "inverse-EMA adaptive",
-            "ema_alpha": ema_alpha,
         },
     )
 
@@ -105,7 +125,19 @@ pinn_model = PINNs(in_dim=3, hidden_dim=hidden_dim, out_dim=5, num_layer=num_lay
 pinn_model.apply(init_weights)
 pinn_model = pinn_model.double()
 
-adam_optimizer = Adam(pinn_model.parameters(), lr=lr_adam)
+# Learnable adaptive loss weights, one per loss term, initialized to 1.0
+loss_weights = nn.Parameter(torch.ones(11, dtype=torch.float64, device=device))
+
+adam_optimizer = Adam(
+    [
+        {"params": pinn_model.parameters(), "lr": lr_adam},
+        {"params": [loss_weights],          "lr": lr_weights},
+    ],
+    betas=(0.99, 0.999),
+)
+adam_lr_scheduler = torch.optim.lr_scheduler.StepLR(
+    adam_optimizer, step_size=lr_decay_steps, gamma=lr_decay_rate
+)
 
 start_time = time.time()
 training_loss_track  = []
@@ -116,44 +148,22 @@ validation_points = validation_points_raw / 1000
 global_step = 0
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Adaptive loss weighting
-# ─────────────────────────────────────────────────────────────────────────────
-LOSS_KEYS = [
-    "divergence", "momentum_x", "momentum_y", "momentum_z",
-    "inlet_boundary", "outlet_boundary", "other_boundary",
-    "heat", "inlet_temp_boundary", "t_wall_boundary", "supervised",
-]
-n_losses = len(LOSS_KEYS)
-
-# EMA of each loss magnitude — initialised to 1 so first-step weights are equal
-loss_ema = torch.ones(n_losses, dtype=torch.float64)
+def weighted_total_loss(losses_list):
+    """
+    losses_list: list of 11 scalar tensors in the same order as LOSS_NAMES.
+    Returns: sum(w_i * l_i) - sum(w_i)
+    """
+    losses_stack = torch.stack(losses_list)
+    return torch.sum(loss_weights * losses_stack) - torch.sum(loss_weights)
 
 
-def get_adaptive_weights(ema, eps=1e-10):
-    """Inverse-EMA weights, normalised so their mean equals 1."""
-    inv = 1.0 / (ema + eps)
-    return inv / inv.mean()
+def weights_log_dict():
+    return {name: loss_weights[i].item() for i, name in enumerate(LOSS_NAMES)}
 
 
-def update_ema(ema, losses_list, alpha=ema_alpha):
-    """Update EMA in-place with the current raw loss values."""
-    with torch.no_grad():
-        vals = torch.stack([l.detach() for l in losses_list])
-        return alpha * ema + (1.0 - alpha) * vals
-
-
-def weighted_total(losses_list, weights):
-    return sum(w * l for w, l in zip(weights, losses_list))
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Validation helper
-# ─────────────────────────────────────────────────────────────────────────────
 def run_validation(epoch_label):
     pinn_model.eval()
-    if epoch_label == "adam":
-        adam_optimizer.zero_grad()
+    adam_optimizer.zero_grad() if epoch_label == "adam" else None
 
     validation_points.requires_grad_(True)
     validation_fields = pinn_model(validation_points)
@@ -249,7 +259,7 @@ def run_validation(epoch_label):
 # Stage 1: Adam  (resample collocation points each epoch)
 # ─────────────────────────────────────────────────────────────────────────────
 print("=" * 60)
-print("Stage 1: Adam optimizer  [adaptive loss weighting]")
+print("Stage 1: Adam optimizer")
 print("=" * 60)
 
 for epoch in range(epochs_adam):
@@ -257,7 +267,6 @@ for epoch in range(epochs_adam):
 
     val_log = run_validation("adam")
 
-    # Resample collocation points each Adam epoch
     train_points, train_labels = sample_points(obj, 30000, 3000, 20000)
     train_points = train_points / 1000
     train_points.requires_grad_(True)
@@ -322,22 +331,25 @@ for epoch in range(epochs_adam):
         + torch.mean((fields_supervised[:, 4] * 1000 - temp_sampled_data) ** 2) / 10**6
     )
 
-    all_losses = [
-        loss_divergence, loss_momentum_x, loss_momentum_y, loss_momentum_z,
-        loss_inlet_boundary, loss_outlet_boundary, loss_other_boundary,
-        loss_heat, loss_inlet_temp_boundary, loss_t_wall_boundary, supervised_loss,
-    ]
-
-    # Compute weights from EMA, then update EMA for next step
-    weights = get_adaptive_weights(loss_ema)
-    loss_total = weighted_total(all_losses, weights)
-    loss_ema[:] = update_ema(loss_ema, all_losses)
+    loss_total = weighted_total_loss([
+        loss_divergence,
+        loss_momentum_x,
+        loss_momentum_y,
+        loss_momentum_z,
+        loss_inlet_boundary,
+        loss_outlet_boundary,
+        loss_other_boundary,
+        supervised_loss,
+        loss_heat,
+        loss_inlet_temp_boundary,
+        loss_t_wall_boundary,
+    ])
 
     loss_total.backward()
     adam_optimizer.step()
+    adam_lr_scheduler.step()
 
     training_loss_track.append(loss_total.item())
-    weight_log = {f"Weight/{k}": weights[i].item() for i, k in enumerate(LOSS_KEYS)}
     train_log = {
         "Divergence Loss":                    np.log10(loss_divergence.item()),
         "X Momentum Loss":                    np.log10(loss_momentum_x.item()),
@@ -352,14 +364,16 @@ for epoch in range(epochs_adam):
         "Surface Temperature Boundary Loss":  np.log10(loss_t_wall_boundary.item()),
         "Total Loss":                         np.log10(loss_total.item()),
         "Stage": 1,
-        **weight_log,
+        "LR": adam_lr_scheduler.get_last_lr()[0],
+        **weights_log_dict(),
     }
     print(
-        f"  Div: {loss_divergence.item():.4e} (w={weights[0].item():.2f})  "
-        f"Inlet BC: {loss_inlet_boundary.item():.4e} (w={weights[4].item():.2f})  "
-        f"Wall BC: {loss_other_boundary.item():.4e} (w={weights[6].item():.2f})  "
-        f"T-wall: {loss_t_wall_boundary.item():.4e} (w={weights[9].item():.2f})  "
-        f"Total: {loss_total.item():.4e}"
+        f"  Div: {loss_divergence.item():.4e}  "
+        f"X-Mom: {loss_momentum_x.item():.4e}  "
+        f"Wall: {loss_other_boundary.item():.4e}  "
+        f"Sup: {supervised_loss.item():.4e}  "
+        f"Total: {loss_total.item():.4e}  "
+        f"Weights: {[f'{w:.3f}' for w in loss_weights.detach().cpu().tolist()]}"
     )
 
     if not debug:
@@ -372,26 +386,28 @@ for epoch in range(epochs_adam):
 # ─────────────────────────────────────────────────────────────────────────────
 if run_lbfgs:
     print("=" * 60)
-    print("Stage 2: L-BFGS optimizer  [adaptive loss weighting]")
+    print("Stage 2: L-BFGS optimizer (fixed collocation points)")
     print("=" * 60)
 else:
     print("Stage 2 (L-BFGS) skipped.")
 
 if run_lbfgs:
-    lbfgs_optimizer = LBFGS(pinn_model.parameters(), line_search_fn="strong_wolfe")
+    lbfgs_optimizer = LBFGS(
+        list(pinn_model.parameters()) + [loss_weights],
+        line_search_fn="strong_wolfe",
+    )
 
-    # Sample once and keep fixed for the entire L-BFGS stage
     train_points_fixed, train_labels_fixed = sample_points(obj, 30000, 3000, 20000)
     train_points_fixed = train_points_fixed / 1000
     train_points_fixed.requires_grad_(True)
 
-    indices_fixed           = torch.randint(0, train_data_points.shape[0], (num_samples,))
-    sampled_points_fixed    = train_data_points[indices_fixed]
-    vx_sampled_fixed        = train_vx_data[indices_fixed]
-    vy_sampled_fixed        = train_vy_data[indices_fixed]
-    vz_sampled_fixed        = train_vz_data[indices_fixed]
-    p_sampled_fixed         = train_p_data[indices_fixed]
-    temp_sampled_fixed      = train_temp_data[indices_fixed]
+    indices_fixed        = torch.randint(0, train_data_points.shape[0], (num_samples,))
+    sampled_points_fixed = train_data_points[indices_fixed]
+    vx_sampled_fixed     = train_vx_data[indices_fixed]
+    vy_sampled_fixed     = train_vy_data[indices_fixed]
+    vz_sampled_fixed     = train_vz_data[indices_fixed]
+    p_sampled_fixed      = train_p_data[indices_fixed]
+    temp_sampled_fixed   = train_temp_data[indices_fixed]
 
     _last_train_losses = {}
 
@@ -402,9 +418,6 @@ if run_lbfgs:
 
         pinn_model.train()
         lbfgs_optimizer.zero_grad(True)
-
-        # Freeze weights for the duration of this epoch's closure calls
-        current_weights = get_adaptive_weights(loss_ema)
 
         def closure():
             lbfgs_optimizer.zero_grad()
@@ -458,14 +471,19 @@ if run_lbfgs:
                 + torch.mean((fields_supervised[:, 4] * 1000 - temp_sampled_fixed) ** 2) / 10**6
             )
 
-            all_losses = [
-                loss_divergence, loss_momentum_x, loss_momentum_y, loss_momentum_z,
-                loss_inlet_boundary, loss_outlet_boundary, loss_other_boundary,
-                loss_heat, loss_inlet_temp_boundary, loss_t_wall_boundary, supervised_loss,
-            ]
-
-            # Use weights frozen before this epoch's step (stable across line-search calls)
-            loss_total = weighted_total(all_losses, current_weights)
+            loss_total = weighted_total_loss([
+                loss_divergence,
+                loss_momentum_x,
+                loss_momentum_y,
+                loss_momentum_z,
+                loss_inlet_boundary,
+                loss_outlet_boundary,
+                loss_other_boundary,
+                supervised_loss,
+                loss_heat,
+                loss_inlet_temp_boundary,
+                loss_t_wall_boundary,
+            ])
 
             _last_train_losses.update({
                 "Divergence Loss":                   np.log10(loss_divergence.item()),
@@ -481,11 +499,11 @@ if run_lbfgs:
                 "Surface Temperature Boundary Loss": np.log10(loss_t_wall_boundary.item()),
                 "Total Loss":                        np.log10(loss_total.item()),
                 "Stage": 2,
-                "_total_raw":   loss_total.item(),
-                "_div_raw":     loss_divergence.item(),
-                "_wall_raw":    loss_other_boundary.item(),
-                "_sup_raw":     supervised_loss.item(),
-                "_losses_list": all_losses,
+                "_total_raw": loss_total.item(),
+                "_div_raw":   loss_divergence.item(),
+                "_wall_raw":  loss_other_boundary.item(),
+                "_sup_raw":   supervised_loss.item(),
+                **weights_log_dict(),
             })
 
             loss_total.backward()
@@ -493,28 +511,25 @@ if run_lbfgs:
 
         lbfgs_optimizer.step(closure)
 
-        # Update EMA once per epoch with the last closure evaluation
-        if "_losses_list" in _last_train_losses:
-            loss_ema[:] = update_ema(loss_ema, _last_train_losses["_losses_list"])
-
         training_loss_track.append(_last_train_losses["_total_raw"])
         print(
             f"  Div: {_last_train_losses['_div_raw']:.4e}  "
             f"Wall: {_last_train_losses['_wall_raw']:.4e}  "
             f"Sup: {_last_train_losses['_sup_raw']:.4e}  "
-            f"Total: {_last_train_losses['_total_raw']:.4e}"
+            f"Total: {_last_train_losses['_total_raw']:.4e}  "
+            f"Weights: {[f'{w:.3f}' for w in loss_weights.detach().cpu().tolist()]}"
         )
 
         if not debug:
-            weight_log = {f"Weight/{k}": current_weights[i].item() for i, k in enumerate(LOSS_KEYS)}
             train_log = {k: v for k, v in _last_train_losses.items() if not k.startswith("_")}
-            wandb.log({**train_log, **val_log, **weight_log}, step=global_step)
+            wandb.log({**train_log, **val_log}, step=global_step)
         global_step += 1
 
 
 stop_time = time.time()
 print(f"Time taken for training: {stop_time - start_time:.1f}s")
 torch.save(pinn_model.state_dict(), "../run/pinn_model_v4.pt")
+torch.save(loss_weights.detach().cpu(), "../run/loss_weights_v4.pt")
 
 
 ## Plotting
