@@ -122,7 +122,7 @@ def get_loss(
             vx[labels == 0] * vx_x[labels == 0]
             + vy[labels == 0] * vx_y[labels == 0]
             + vz[labels == 0] * vx_z[labels == 0]
-            + (1 / rho) * p_x[labels == 0]
+            + (10**5 / rho) * p_x[labels == 0]
             - (mu[labels == 0] / rho)
             * (vx_xx[labels == 0] + vx_yy[labels == 0] + vx_zz[labels == 0])
         )
@@ -133,7 +133,7 @@ def get_loss(
             vx[labels == 0] * vy_x[labels == 0]
             + vy[labels == 0] * vy_y[labels == 0]
             + vz[labels == 0] * vy_z[labels == 0]
-            + (1 / rho) * p_y[labels == 0]
+            + (10**5 / rho) * p_y[labels == 0]
             - (mu[labels == 0] / rho)
             * (vy_xx[labels == 0] + vy_yy[labels == 0] + vy_zz[labels == 0])
         )
@@ -144,7 +144,7 @@ def get_loss(
             vx[labels == 0] * vz_x[labels == 0]
             + vy[labels == 0] * vz_y[labels == 0]
             + vz[labels == 0] * vz_z[labels == 0]
-            + (1 / rho) * p_z[labels == 0]
+            + (10**5 / rho) * p_z[labels == 0]
             - (mu[labels == 0] / rho)
             * (vz_xx[labels == 0] + vz_yy[labels == 0] + vz_zz[labels == 0])
         )

@@ -28,8 +28,9 @@ data_folder = "./preProcessedData/with_T/" + folder + "/"
 Full_Project_name = Project_name + "_" + folder
 
 # Hyperparams
-epochs_adam  = 500# 500   # Stage 1: Adam with per-epoch resampling
+epochs_adam  = 50 # 200   # Stage 1: Adam with per-epoch resampling
 epochs_lbfgs = 100 # 100   # Stage 2: L-BFGS with fixed collocation points
+run_lbfgs    = False        # Set to False to skip Stage 2
 hidden_dim   = 128
 num_layer    = 4
 seed         = 42
@@ -106,9 +107,8 @@ start_time = time.time()
 training_loss_track  = []
 validation_loss_track = []
 
-validation_points, validation_labels = sample_points(obj, 30000, 3000, 20000)
-validation_points = validation_points / 1000
-
+validation_points_raw, validation_labels = sample_points(obj, 30000, 3000, 20000)
+validation_points = validation_points_raw / 1000
 global_step = 0
 
 
@@ -283,15 +283,14 @@ for epoch in range(epochs_adam):
         + torch.mean((fields_supervised[:, 4] * 1000 - temp_sampled_data) ** 2) / 10**6
     )
 
-    # Equal weights for all physics/BC terms; heat slightly down-weighted
     loss_total = (
         loss_divergence
         + loss_momentum_x
         + loss_momentum_y
         + loss_momentum_z
-        + loss_inlet_boundary
+        + 10.0 * loss_inlet_boundary
         + loss_outlet_boundary
-        + loss_other_boundary
+        + 10.0 * loss_other_boundary
         + supervised_loss
         + 0.1 * loss_heat
         + loss_inlet_temp_boundary
@@ -333,140 +332,144 @@ for epoch in range(epochs_adam):
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: L-BFGS  (fixed collocation points — keeps loss landscape stable)
 # ─────────────────────────────────────────────────────────────────────────────
-print("=" * 60)
-print("Stage 2: L-BFGS optimizer (fixed collocation points)")
-print("=" * 60)
+if run_lbfgs:
+    print("=" * 60)
+    print("Stage 2: L-BFGS optimizer (fixed collocation points)")
+    print("=" * 60)
+else:
+    print("Stage 2 (L-BFGS) skipped.")
 
-lbfgs_optimizer = LBFGS(pinn_model.parameters(), line_search_fn="strong_wolfe")
+if run_lbfgs:
+    lbfgs_optimizer = LBFGS(pinn_model.parameters(), line_search_fn="strong_wolfe")
 
-# Sample once and keep fixed for the entire L-BFGS stage
-train_points_fixed, train_labels_fixed = sample_points(obj, 30000, 3000, 20000)
-train_points_fixed = train_points_fixed / 1000
-train_points_fixed.requires_grad_(True)
+    # Sample once and keep fixed for the entire L-BFGS stage
+    train_points_fixed, train_labels_fixed = sample_points(obj, 30000, 3000, 20000)
+    train_points_fixed = train_points_fixed / 1000
+    train_points_fixed.requires_grad_(True)
 
-indices_fixed           = torch.randint(0, train_data_points.shape[0], (num_samples,))
-sampled_points_fixed    = train_data_points[indices_fixed]
-vx_sampled_fixed        = train_vx_data[indices_fixed]
-vy_sampled_fixed        = train_vy_data[indices_fixed]
-vz_sampled_fixed        = train_vz_data[indices_fixed]
-p_sampled_fixed         = train_p_data[indices_fixed]
-temp_sampled_fixed      = train_temp_data[indices_fixed]
+    indices_fixed           = torch.randint(0, train_data_points.shape[0], (num_samples,))
+    sampled_points_fixed    = train_data_points[indices_fixed]
+    vx_sampled_fixed        = train_vx_data[indices_fixed]
+    vy_sampled_fixed        = train_vy_data[indices_fixed]
+    vz_sampled_fixed        = train_vz_data[indices_fixed]
+    p_sampled_fixed         = train_p_data[indices_fixed]
+    temp_sampled_fixed      = train_temp_data[indices_fixed]
 
-# Mutable container to capture the last closure evaluation for logging
-_last_train_losses = {}
+    # Mutable container to capture the last closure evaluation for logging
+    _last_train_losses = {}
 
-for epoch in range(epochs_lbfgs):
-    print(f"[L-BFGS] {epoch+1}/{epochs_lbfgs}")
+    for epoch in range(epochs_lbfgs):
+        print(f"[L-BFGS] {epoch+1}/{epochs_lbfgs}")
 
-    val_log = run_validation("lbfgs")
+        val_log = run_validation("lbfgs")
 
-    pinn_model.train()
-    lbfgs_optimizer.zero_grad(True)
+        pinn_model.train()
+        lbfgs_optimizer.zero_grad(True)
 
-    def closure():
-        lbfgs_optimizer.zero_grad()
+        def closure():
+            lbfgs_optimizer.zero_grad()
 
-        train_fields = pinn_model(train_points_fixed)
-        (
-            vx, vy, vz, p, T,
-            vx_x, vx_y, vx_z, vx_xx, vx_yy, vx_zz,
-            vy_x, vy_y, vy_z, vy_xx, vy_yy, vy_zz,
-            vz_x, vz_y, vz_z, vz_xx, vz_yy, vz_zz,
-            p_x, p_y, p_z,
-            T_x, T_y, T_z, T_xx, T_yy, T_zz,
-        ) = get_values_and_derivatives(train_fields, train_points_fixed)
+            train_fields = pinn_model(train_points_fixed)
+            (
+                vx, vy, vz, p, T,
+                vx_x, vx_y, vx_z, vx_xx, vx_yy, vx_zz,
+                vy_x, vy_y, vy_z, vy_xx, vy_yy, vy_zz,
+                vz_x, vz_y, vz_z, vz_xx, vz_yy, vz_zz,
+                p_x, p_y, p_z,
+                T_x, T_y, T_z, T_xx, T_yy, T_zz,
+            ) = get_values_and_derivatives(train_fields, train_points_fixed)
 
-        (
-            loss_divergence,
-            loss_momentum_x,
-            loss_momentum_y,
-            loss_momentum_z,
-            loss_outlet_boundary,
-            loss_other_boundary,
-            loss_heat,
-            loss_t_wall_boundary,
-        ) = get_loss(
-            vx, vy, vz, p, T,
-            vx_x, vx_y, vx_z, vx_xx, vx_yy, vx_zz,
-            vy_x, vy_y, vy_z, vy_xx, vy_yy, vy_zz,
-            vz_x, vz_y, vz_z, vz_xx, vz_yy, vz_zz,
-            p_x, p_y, p_z,
-            T_x, T_y, T_z, T_xx, T_yy, T_zz,
-            train_labels_fixed,
-            p_outlet,
+            (
+                loss_divergence,
+                loss_momentum_x,
+                loss_momentum_y,
+                loss_momentum_z,
+                loss_outlet_boundary,
+                loss_other_boundary,
+                loss_heat,
+                loss_t_wall_boundary,
+            ) = get_loss(
+                vx, vy, vz, p, T,
+                vx_x, vx_y, vx_z, vx_xx, vx_yy, vx_zz,
+                vy_x, vy_y, vy_z, vy_xx, vy_yy, vy_zz,
+                vz_x, vz_y, vz_z, vz_xx, vz_yy, vz_zz,
+                p_x, p_y, p_z,
+                T_x, T_y, T_z, T_xx, T_yy, T_zz,
+                train_labels_fixed,
+                p_outlet,
+            )
+
+            inlet_fields = pinn_model(inlet_points)
+            loss_inlet_boundary = (
+                torch.mean((inlet_fields[:, 0] - vx_inlet_data) ** 2)
+                + torch.mean((inlet_fields[:, 1] - vy_inlet_data) ** 2)
+                + torch.mean((inlet_fields[:, 2] - vz_inlet_data) ** 2)
+            )
+            loss_inlet_temp_boundary = (
+                torch.mean((inlet_fields[:, 4] * 1000 - T_inlet) ** 2) / 10**6
+            )
+
+            fields_supervised = pinn_model(sampled_points_fixed)
+            supervised_loss = (
+                torch.mean((fields_supervised[:, 0] - vx_sampled_fixed) ** 2)
+                + torch.mean((fields_supervised[:, 1] - vy_sampled_fixed) ** 2)
+                + torch.mean((fields_supervised[:, 2] - vz_sampled_fixed) ** 2)
+                + torch.mean((fields_supervised[:, 3] - p_sampled_fixed) ** 2)
+                + torch.mean((fields_supervised[:, 4] * 1000 - temp_sampled_fixed) ** 2) / 10**6
+            )
+
+            loss_total = (
+                loss_divergence
+                + loss_momentum_x
+                + loss_momentum_y
+                + loss_momentum_z
+                + 10.0 * loss_inlet_boundary
+                + loss_outlet_boundary
+                + 10.0 * loss_other_boundary
+                + supervised_loss
+                + 0.1 * loss_heat
+                + loss_inlet_temp_boundary
+                + loss_t_wall_boundary
+            )
+
+            # Capture values from the last closure call for logging
+            _last_train_losses.update({
+                "Divergence Loss":                   np.log10(loss_divergence.item()),
+                "X Momentum Loss":                   np.log10(loss_momentum_x.item()),
+                "Y Momentum Loss":                   np.log10(loss_momentum_y.item()),
+                "Z Momentum Loss":                   np.log10(loss_momentum_z.item()),
+                "Inlet Boundary Loss":               np.log10(loss_inlet_boundary.item()),
+                "Outlet Boundary Loss":              np.log10(loss_outlet_boundary.item()),
+                "Other Boundary Loss":               np.log10(loss_other_boundary.item()),
+                "Supervised Loss":                   np.log10(supervised_loss.item()),
+                "Heat Loss":                         np.log10(loss_heat.item()),
+                "Inlet Temperature Boundary Loss":   np.log10(loss_inlet_temp_boundary.item()),
+                "Surface Temperature Boundary Loss": np.log10(loss_t_wall_boundary.item()),
+                "Total Loss":                        np.log10(loss_total.item()),
+                "Stage": 2,
+                "_total_raw": loss_total.item(),
+                "_div_raw":   loss_divergence.item(),
+                "_wall_raw":  loss_other_boundary.item(),
+                "_sup_raw":   supervised_loss.item(),
+            })
+
+            loss_total.backward()
+            return loss_total
+
+        lbfgs_optimizer.step(closure)
+
+        training_loss_track.append(_last_train_losses["_total_raw"])
+        print(
+            f"  Div: {_last_train_losses['_div_raw']:.4e}  "
+            f"Wall: {_last_train_losses['_wall_raw']:.4e}  "
+            f"Sup: {_last_train_losses['_sup_raw']:.4e}  "
+            f"Total: {_last_train_losses['_total_raw']:.4e}"
         )
 
-        inlet_fields = pinn_model(inlet_points)
-        loss_inlet_boundary = (
-            torch.mean((inlet_fields[:, 0] - vx_inlet_data) ** 2)
-            + torch.mean((inlet_fields[:, 1] - vy_inlet_data) ** 2)
-            + torch.mean((inlet_fields[:, 2] - vz_inlet_data) ** 2)
-        )
-        loss_inlet_temp_boundary = (
-            torch.mean((inlet_fields[:, 4] * 1000 - T_inlet) ** 2) / 10**6
-        )
-
-        fields_supervised = pinn_model(sampled_points_fixed)
-        supervised_loss = (
-            torch.mean((fields_supervised[:, 0] - vx_sampled_fixed) ** 2)
-            + torch.mean((fields_supervised[:, 1] - vy_sampled_fixed) ** 2)
-            + torch.mean((fields_supervised[:, 2] - vz_sampled_fixed) ** 2)
-            + torch.mean((fields_supervised[:, 3] - p_sampled_fixed) ** 2)
-            + torch.mean((fields_supervised[:, 4] * 1000 - temp_sampled_fixed) ** 2) / 10**6
-        )
-
-        loss_total = (
-            loss_divergence
-            + loss_momentum_x
-            + loss_momentum_y
-            + loss_momentum_z
-            + loss_inlet_boundary
-            + loss_outlet_boundary
-            + loss_other_boundary
-            + supervised_loss
-            + 0.1 * loss_heat
-            + loss_inlet_temp_boundary
-            + loss_t_wall_boundary
-        )
-
-        # Capture values from the last closure call for logging
-        _last_train_losses.update({
-            "Divergence Loss":                   np.log10(loss_divergence.item()),
-            "X Momentum Loss":                   np.log10(loss_momentum_x.item()),
-            "Y Momentum Loss":                   np.log10(loss_momentum_y.item()),
-            "Z Momentum Loss":                   np.log10(loss_momentum_z.item()),
-            "Inlet Boundary Loss":               np.log10(loss_inlet_boundary.item()),
-            "Outlet Boundary Loss":              np.log10(loss_outlet_boundary.item()),
-            "Other Boundary Loss":               np.log10(loss_other_boundary.item()),
-            "Supervised Loss":                   np.log10(supervised_loss.item()),
-            "Heat Loss":                         np.log10(loss_heat.item()),
-            "Inlet Temperature Boundary Loss":   np.log10(loss_inlet_temp_boundary.item()),
-            "Surface Temperature Boundary Loss": np.log10(loss_t_wall_boundary.item()),
-            "Total Loss":                        np.log10(loss_total.item()),
-            "Stage": 2,
-            "_total_raw": loss_total.item(),
-            "_div_raw":   loss_divergence.item(),
-            "_wall_raw":  loss_other_boundary.item(),
-            "_sup_raw":   supervised_loss.item(),
-        })
-
-        loss_total.backward()
-        return loss_total
-
-    lbfgs_optimizer.step(closure)
-
-    training_loss_track.append(_last_train_losses["_total_raw"])
-    print(
-        f"  Div: {_last_train_losses['_div_raw']:.4e}  "
-        f"Wall: {_last_train_losses['_wall_raw']:.4e}  "
-        f"Sup: {_last_train_losses['_sup_raw']:.4e}  "
-        f"Total: {_last_train_losses['_total_raw']:.4e}"
-    )
-
-    if not debug:
-        train_log = {k: v for k, v in _last_train_losses.items() if not k.startswith("_")}
-        wandb.log({**train_log, **val_log}, step=global_step)
-    global_step += 1
+        if not debug:
+            train_log = {k: v for k, v in _last_train_losses.items() if not k.startswith("_")}
+            wandb.log({**train_log, **val_log}, step=global_step)
+        global_step += 1
 
 
 stop_time = time.time()

@@ -350,7 +350,7 @@ def plot_aginast_data(folder_path, vx_pred, vy_pred, vz_pred, p_pred, T_pred):
             f"{_field[3]} - Train RMSE: {supervised_rms_error_velocity}, Test RMSE: {test_rms_error_velocity}"
         )
 
-    scalar_field = p[:, 3]
+    scalar_field = p[:, 3] / 1e5  # Pa → bar to match model output
     index = np.random.choice(vx[:, :3].shape[0], 50000, replace=False)
     selected_points = vx[:, :3][index]
     selected_scalar_field = scalar_field[index]
