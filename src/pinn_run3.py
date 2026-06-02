@@ -28,8 +28,8 @@ data_folder = "./preProcessedData/with_T/" + folder + "/"
 Full_Project_name = Project_name + "_" + folder
 
 # Hyperparams
-epochs_adam  = 1# 500   # Stage 1: Adam with per-epoch resampling
-epochs_lbfgs = 1 # 100   # Stage 2: L-BFGS with fixed collocation points
+epochs_adam  = 500# 500   # Stage 1: Adam with per-epoch resampling
+epochs_lbfgs = 100 # 100   # Stage 2: L-BFGS with fixed collocation points
 hidden_dim   = 128
 num_layer    = 4
 seed         = 42
