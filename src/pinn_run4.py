@@ -99,7 +99,7 @@ vz_data     = torch.tensor(np.load(data_folder + "vel_z.npy")[:, 3])
 p_data      = torch.tensor(np.load(data_folder + "press.npy")[:, 3])
 temp_data   = torch.tensor(np.load(data_folder + "temp.npy")[:, 3])
 
-num_samples = 5000
+num_samples = 50000
 n_test      = 100000
 perm        = torch.randperm(data_points.shape[0])
 train_idx   = perm[n_test:]
@@ -210,13 +210,12 @@ def run_validation(epoch_label):
 
     with torch.no_grad():
         test_fields = pinn_model(test_data_points)
-    test_supervised_loss = (
-        torch.mean((test_fields[:, 0] - test_vx_data) ** 2)
-        + torch.mean((test_fields[:, 1] - test_vy_data) ** 2)
-        + torch.mean((test_fields[:, 2] - test_vz_data) ** 2)
-        + torch.mean((test_fields[:, 3] - test_p_data) ** 2)
-        + torch.mean((test_fields[:, 4] * 1000 - test_temp_data) ** 2) / 10**6
-    )
+    test_sup_vx = torch.mean((test_fields[:, 0] - test_vx_data) ** 2)
+    test_sup_vy = torch.mean((test_fields[:, 1] - test_vy_data) ** 2)
+    test_sup_vz = torch.mean((test_fields[:, 2] - test_vz_data) ** 2)
+    test_sup_p  = torch.mean((test_fields[:, 3] - test_p_data) ** 2)
+    test_sup_T  = torch.mean((test_fields[:, 4] * 1000 - test_temp_data) ** 2) / 10**6
+    test_supervised_loss = test_sup_vx + test_sup_vy + test_sup_vz + test_sup_p + test_sup_T
 
     val_fields_list = [
         ("vx", validation_fields[:, 0].cpu().detach().numpy()),
@@ -238,6 +237,11 @@ def run_validation(epoch_label):
         "Validation Surface Temperature Boundary Loss": np.log10(val_loss_t_wall_boundary.item()),
         "Validation Total Loss":                        np.log10(val_loss_total.item()),
         "Test Supervised Loss":                         np.log10(test_supervised_loss.item()),
+        "Test Supervised vx Loss":                      np.log10(test_sup_vx.item()),
+        "Test Supervised vy Loss":                      np.log10(test_sup_vy.item()),
+        "Test Supervised vz Loss":                      np.log10(test_sup_vz.item()),
+        "Test Supervised p Loss":                       np.log10(test_sup_p.item()),
+        "Test Supervised T Loss":                       np.log10(test_sup_T.item()),
     }
 
     validation_loss_track.append(val_loss_total.item())
@@ -323,13 +327,12 @@ for epoch in range(epochs_adam):
     )
 
     fields_supervised = pinn_model(sampled_points)
-    supervised_loss = (
-        torch.mean((fields_supervised[:, 0] - vx_sampled_data) ** 2)
-        + torch.mean((fields_supervised[:, 1] - vy_sampled_data) ** 2)
-        + torch.mean((fields_supervised[:, 2] - vz_sampled_data) ** 2)
-        + torch.mean((fields_supervised[:, 3] - p_sampled_data) ** 2)
-        + torch.mean((fields_supervised[:, 4] * 1000 - temp_sampled_data) ** 2) / 10**6
-    )
+    sup_vx = torch.mean((fields_supervised[:, 0] - vx_sampled_data) ** 2)
+    sup_vy = torch.mean((fields_supervised[:, 1] - vy_sampled_data) ** 2)
+    sup_vz = torch.mean((fields_supervised[:, 2] - vz_sampled_data) ** 2)
+    sup_p  = torch.mean((fields_supervised[:, 3] - p_sampled_data) ** 2)
+    sup_T  = torch.mean((fields_supervised[:, 4] * 1000 - temp_sampled_data) ** 2) / 10**6
+    supervised_loss = sup_vx + sup_vy + sup_vz + sup_p + sup_T
 
     loss_total = weighted_total_loss([
         loss_divergence,
@@ -359,6 +362,11 @@ for epoch in range(epochs_adam):
         "Outlet Boundary Loss":               np.log10(loss_outlet_boundary.item()),
         "Other Boundary Loss":                np.log10(loss_other_boundary.item()),
         "Supervised Loss":                    np.log10(supervised_loss.item()),
+        "Supervised vx Loss":                 np.log10(sup_vx.item()),
+        "Supervised vy Loss":                 np.log10(sup_vy.item()),
+        "Supervised vz Loss":                 np.log10(sup_vz.item()),
+        "Supervised p Loss":                  np.log10(sup_p.item()),
+        "Supervised T Loss":                  np.log10(sup_T.item()),
         "Heat Loss":                          np.log10(loss_heat.item()),
         "Inlet Temperature Boundary Loss":    np.log10(loss_inlet_temp_boundary.item()),
         "Surface Temperature Boundary Loss":  np.log10(loss_t_wall_boundary.item()),
@@ -463,13 +471,12 @@ if run_lbfgs:
             )
 
             fields_supervised = pinn_model(sampled_points_fixed)
-            supervised_loss = (
-                torch.mean((fields_supervised[:, 0] - vx_sampled_fixed) ** 2)
-                + torch.mean((fields_supervised[:, 1] - vy_sampled_fixed) ** 2)
-                + torch.mean((fields_supervised[:, 2] - vz_sampled_fixed) ** 2)
-                + torch.mean((fields_supervised[:, 3] - p_sampled_fixed) ** 2)
-                + torch.mean((fields_supervised[:, 4] * 1000 - temp_sampled_fixed) ** 2) / 10**6
-            )
+            sup_vx = torch.mean((fields_supervised[:, 0] - vx_sampled_fixed) ** 2)
+            sup_vy = torch.mean((fields_supervised[:, 1] - vy_sampled_fixed) ** 2)
+            sup_vz = torch.mean((fields_supervised[:, 2] - vz_sampled_fixed) ** 2)
+            sup_p  = torch.mean((fields_supervised[:, 3] - p_sampled_fixed) ** 2)
+            sup_T  = torch.mean((fields_supervised[:, 4] * 1000 - temp_sampled_fixed) ** 2) / 10**6
+            supervised_loss = sup_vx + sup_vy + sup_vz + sup_p + sup_T
 
             loss_total = weighted_total_loss([
                 loss_divergence,
@@ -494,6 +501,11 @@ if run_lbfgs:
                 "Outlet Boundary Loss":              np.log10(loss_outlet_boundary.item()),
                 "Other Boundary Loss":               np.log10(loss_other_boundary.item()),
                 "Supervised Loss":                   np.log10(supervised_loss.item()),
+                "Supervised vx Loss":                np.log10(sup_vx.item()),
+                "Supervised vy Loss":                np.log10(sup_vy.item()),
+                "Supervised vz Loss":                np.log10(sup_vz.item()),
+                "Supervised p Loss":                 np.log10(sup_p.item()),
+                "Supervised T Loss":                 np.log10(sup_T.item()),
                 "Heat Loss":                         np.log10(loss_heat.item()),
                 "Inlet Temperature Boundary Loss":   np.log10(loss_inlet_temp_boundary.item()),
                 "Surface Temperature Boundary Loss": np.log10(loss_t_wall_boundary.item()),
