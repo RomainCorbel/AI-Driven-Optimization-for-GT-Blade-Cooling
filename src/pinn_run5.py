@@ -32,7 +32,7 @@ data_folder = "./preProcessedData/with_T/" + folder + "/"
 Full_Project_name = Project_name + "_" + folder
 
 # Hyperparams
-epochs_adam    = 500
+epochs_adam    = 5000
 hidden_dim     = 128
 num_layer      = 4
 seed           = 42
@@ -42,13 +42,14 @@ lr_final       = 1e-5
 lr_decay_rate  = (lr_final / lr_adam) ** (1.0 / epochs_adam)
 
 # Sampling
-num_samples           = 1000
-n_test                = 500
+testing_factor          = 10   # multiply all sample counts by this factor to get more accurate validation curves
+num_samples           = 1000 * testing_factor
+n_test                = 500 *  testing_factor
 
-n_volume_pts          = 2000
-n_outlet_surface_pts  = 200
-n_other_surface_pts   = 800
-n_inlet_pts           = 200
+n_volume_pts          = 2000 * testing_factor
+n_outlet_surface_pts  = 200 * testing_factor
+n_other_surface_pts   = 800 * testing_factor
+n_inlet_pts           = 200 * testing_factor
 
 LOSS_NAMES = [
     "w_divergence",
@@ -90,6 +91,12 @@ if not debug:
             "num_layers": num_layer,
             "input_standardization": True,
             "output_standardization": True,
+            "testing_factor": testing_factor,
+            "num_samples": num_samples,
+            "n_test": n_test,
+            "n_volume_pts": n_volume_pts,
+            "n_outlet_surface_pts": n_outlet_surface_pts,
+            "n_other_surface_pts": n_other_surface_pts,
             "n_inlet_pts": n_inlet_pts,
         },
     )
