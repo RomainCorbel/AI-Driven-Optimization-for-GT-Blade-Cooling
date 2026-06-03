@@ -65,12 +65,13 @@ def sample_points(
     num_volume_points,
     num_outlet_surface_points,
     num_other_surface_points,
+    num_inlet_surface_points,
     shuffle=True,
 ):
     # Prepare the sample points
-    # inlet_surface_points, inlet_surface_labels = get_inlet_surface_points(
-    #     obj, num_inlet_surface_points
-    # )
+    inlet_surface_points, inlet_surface_labels = get_inlet_surface_points(
+        obj, num_inlet_surface_points
+    )
     outlet_surface_points, outlet_surface_labels = get_outlet_surface_points(
         obj, num_outlet_surface_points
     )
@@ -81,7 +82,7 @@ def sample_points(
     # Combine points and labels
     all_points = torch.cat(
         [
-            # inlet_surface_points,
+            inlet_surface_points,
             outlet_surface_points,
             other_surface_points,
             volume_points,
@@ -90,7 +91,7 @@ def sample_points(
     )
     all_labels = torch.cat(
         [
-            # inlet_surface_labels,
+            inlet_surface_labels,
             outlet_surface_labels,
             other_surface_labels,
             volume_labels,

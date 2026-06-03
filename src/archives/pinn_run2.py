@@ -9,7 +9,7 @@ torch.set_default_dtype(torch.float64)
 from utils import *
 from unet import *
 from torch.optim import LBFGS
-from pinn import *
+from archives.pinn import *
 import time
 import wandb
 import os

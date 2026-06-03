@@ -3,7 +3,7 @@ import argparse
 from unet import *
 from utils import *
 from spline_pinn import *
-from pinn import *
+from archives.pinn import *
 
 
 torch.set_default_dtype(torch.float64)

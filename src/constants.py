@@ -11,4 +11,4 @@ thermal_conductivity = 2.61e-02
 specific_heat = 1.00e03  # at constant pressure
 density = 9.7118e-01  # kg/m^3
 T_inlet = 293.15  # K
-T_wall = 338.15  # K
+T_wall = 298.14  # K
