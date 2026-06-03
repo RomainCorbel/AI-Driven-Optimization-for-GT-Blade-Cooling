@@ -34,8 +34,8 @@ data_folder = "./preProcessedData/with_T/" + folder + "/"
 Full_Project_name = Project_name + "_" + folder
 
 # Hyperparams
-epochs_adam    = 1000
-hidden_dim     = 10 # 128
+epochs_adam    = 200
+hidden_dim     = 20 # 128
 num_layer      = 4 # 4
 seed           = 42
 lr_adam        = 1e-3
@@ -44,7 +44,7 @@ lr_final       = 1e-7
 lr_decay_rate  = (lr_final / lr_adam) ** (1.0 / epochs_adam)
 
 # Sampling
-testing_factor          = 1   # multiply all sample counts by this factor to get more accurate validation curves
+testing_factor          = 5   # multiply all sample counts by this factor to get more accurate validation curves
 num_samples           = 100 * testing_factor
 n_test                = 500 *  testing_factor
 
