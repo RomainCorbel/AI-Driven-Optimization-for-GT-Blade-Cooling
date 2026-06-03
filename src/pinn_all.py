@@ -10,8 +10,6 @@ import wandb
 from git import Repo
 from torch.optim import Adam
 
-from pinn_run7 import Num_points_used_for_training
-
 torch.set_default_dtype(torch.float64)
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -103,7 +101,6 @@ def sample_points(obj, num_volume_points, num_outlet_surface_points,
 
     print(
         f"Number of Outlet surface points: {num_outlet_surface_points}, "
-        f"Number of Inlet surface points: {num_inlet_surface_points}, "
         f"Number of volume points: {num_volume_points}, "
         f"Number of Wall surface points: {num_wall_surface_points}"
     )
@@ -387,14 +384,14 @@ def get_loss(
 # ═════════════════════════════════════════════════════════════════════════════
 
 folder           = "dp11"
-Project_name     = "PINNs-5"
+Project_name     = "PINNs-ALL"
 device           = "cuda"
-debug            = True
+debug            = False
 
 data_folder      = "./preProcessedData/with_T/" + folder + "/"
 Full_Project_name = Project_name + "_" + folder
 
-epochs_adam    = 200
+epochs_adam    = 500
 hidden_dim     = 20
 num_layer      = 4
 seed           = 42
@@ -762,26 +759,26 @@ for epoch in range(epochs_adam):
     adam_lr_scheduler.step()
 
     train_log = {
-        "Divergence Loss":    np.log10(loss_divergence.item()),
-        "X Momentum Loss":    np.log10(loss_momentum_x.item()),
-        "Y Momentum Loss":    np.log10(loss_momentum_y.item()),
-        "Z Momentum Loss":    np.log10(loss_momentum_z.item()),
-        "Heat Loss":          np.log10(loss_heat.item()),
-        "Inlet vx Loss":      np.log10(loss_inlet_vx.item()),
-        "Inlet vy Loss":      np.log10(loss_inlet_vy.item()),
-        "Inlet vz Loss":      np.log10(loss_inlet_vz.item()),
-        "Inlet T Loss":       np.log10(loss_inlet_T.item()),
-        "Outlet p Loss":      np.log10(loss_outlet_p.item()),
-        "Wall vx Loss":       np.log10(loss_wall_vx.item()),
-        "Wall vy Loss":       np.log10(loss_wall_vy.item()),
-        "Wall vz Loss":       np.log10(loss_wall_vz.item()),
-        "Wall T Loss":        np.log10(loss_wall_T.item()),
-        "Supervised vx Loss": np.log10(sup_vx.item()),
-        "Supervised vy Loss": np.log10(sup_vy.item()),
-        "Supervised vz Loss": np.log10(sup_vz.item()),
-        "Supervised p Loss":  np.log10(sup_p.item()),
-        "Supervised T Loss":  np.log10(sup_T.item()),
-        "Total Loss":         np.log10(loss_total.item()),
+        "loss_divergence":    np.log10(loss_divergence.item()),
+        "loss_momentum_x":    np.log10(loss_momentum_x.item()),
+        "loss_momentum_y":    np.log10(loss_momentum_y.item()),
+        "loss_momentum_z":    np.log10(loss_momentum_z.item()),
+        "loss_heat":          np.log10(loss_heat.item()),
+        "loss_inlet_vx":      np.log10(loss_inlet_vx.item()),
+        "loss_inlet_vy":      np.log10(loss_inlet_vy.item()),
+        "loss_inlet_vz":      np.log10(loss_inlet_vz.item()),
+        "loss_inlet_T":       np.log10(loss_inlet_T.item()),
+        "loss_outlet_p":      np.log10(loss_outlet_p.item()),
+        "loss_wall_vx":       np.log10(loss_wall_vx.item()),
+        "loss_wall_vy":       np.log10(loss_wall_vy.item()),
+        "loss_wall_vz":       np.log10(loss_wall_vz.item()),
+        "loss_wall_T":        np.log10(loss_wall_T.item()),
+        "loss_supervised_vx": np.log10(sup_vx.item()),
+        "loss_supervised_vy": np.log10(sup_vy.item()),
+        "loss_supervised_vz": np.log10(sup_vz.item()),
+        "loss_supervised_p":  np.log10(sup_p.item()),
+        "loss_supervised_T":  np.log10(sup_T.item()),
+        "loss_total":         np.log10(loss_total.item()),
         "LR": adam_lr_scheduler.get_last_lr()[0],
         **weights_log_dict(),
     }
@@ -861,7 +858,10 @@ time.sleep(120)
 if repo.is_dirty(untracked_files=True):
     print("Repository has changes, preparing to commit.")
     repo.git.add(A=True)
-    commit_message = f"Running job with run name: {run.name}, url: {run.url}"
+    commit_message = (
+        f"Running job with run name: {run.name}, url: {run.url}"
+        if not debug else "Running job (debug mode)"
+    )
     repo.index.commit(commit_message)
     print(f"Committed changes with message: {commit_message}")
     repo.remote(name="origin").push()
