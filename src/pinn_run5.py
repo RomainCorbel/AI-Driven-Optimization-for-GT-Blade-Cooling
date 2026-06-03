@@ -35,23 +35,23 @@ Full_Project_name = Project_name + "_" + folder
 
 # Hyperparams
 epochs_adam    = 1000
-hidden_dim     = 128
-num_layer      = 4
+hidden_dim     = 10 # 128
+num_layer      = 4 # 4
 seed           = 42
-lr_adam        = 1e-2
-lr_weights     = 1e-2
-lr_final       = 1e-5
+lr_adam        = 1e-3
+lr_weights     = 1e-3
+lr_final       = 1e-7
 lr_decay_rate  = (lr_final / lr_adam) ** (1.0 / epochs_adam)
 
 # Sampling
-testing_factor          = 10   # multiply all sample counts by this factor to get more accurate validation curves
-num_samples           = 1000 * testing_factor
+testing_factor          = 1   # multiply all sample counts by this factor to get more accurate validation curves
+num_samples           = 100 * testing_factor
 n_test                = 500 *  testing_factor
 
-n_volume_pts          = 2000 * testing_factor
-n_outlet_surface_pts  = 200 * testing_factor
-n_other_surface_pts   = 800 * testing_factor
-n_inlet_pts           = 200 * testing_factor
+n_volume_pts          = 200 * testing_factor
+n_outlet_surface_pts  = 20 * testing_factor
+n_other_surface_pts   = 80 * testing_factor
+n_inlet_pts           = 20 * testing_factor
 
 LOSS_NAMES = [
     "w_divergence",
@@ -278,15 +278,6 @@ def run_validation():
     test_sup_T  = torch.mean((test_fields[:, 4] * 1000 - test_temp_data) ** 2) / 10**6
     test_supervised_loss = test_sup_vx + test_sup_vy + test_sup_vz + test_sup_p + test_sup_T
 
-    val_fields_list = [
-        ("vx", validation_fields[:, 0].cpu().detach().numpy()),
-        ("vy", validation_fields[:, 1].cpu().detach().numpy()),
-        ("vz", validation_fields[:, 2].cpu().detach().numpy()),
-        ("p",  validation_fields[:, 3].cpu().detach().numpy()),
-        ("T",  validation_fields[:, 4].cpu().detach().numpy() * 1000),
-    ]
-    plot_fields(val_fields_list, validation_points.cpu().detach().numpy())
-
     def safe_log10(x):
         v = x.item() if hasattr(x, "item") else float(x)
         return float(np.log10(v)) if v > 0 else None
@@ -424,6 +415,8 @@ for epoch in range(epochs_adam):
     loss_total.backward()
     adam_optimizer.step()   # minimise L pour θ
     adam_weights.step()     # maximise L pour w
+    with torch.no_grad():
+        loss_weights.clamp_(min=1e-6)   # w_i > 0 : évite qu'un poids négatif inverse l'objectif
     adam_lr_scheduler.step()
 
     training_loss_track.append(loss_total.item())
