@@ -1,7 +1,9 @@
 # Notes: should be run from the `src/` folder using `python pinn_run5.py`
 # Adam optimizer with resampled collocation points each epoch.
-# Adaptive loss weighting: 11 learnable scalars w_i trained alongside the PINN.
-# Total loss = sum(w_i * l_i) - sum(w_i)  (regularization prevents w_i → 0).
+# Adaptive loss weighting: 15 learnable scalars w_i in a min-max setup.
+# θ minimises, w maximises: sum(w_i * l_i) - sum(w_i).
+# Equilibrium: w_i grows when l_i > 1 (hard terms get more weight),
+# shrinks when l_i < 1. The -sum(w_i) term prevents w_i → +∞.
 # Input/output standardization: coordinates and fields are z-scored inside
 # NormalizedPINNs so the network always sees O(1) values. Autograd chain rule
 # ensures all spatial derivatives remain in physical units.
@@ -32,7 +34,7 @@ data_folder = "./preProcessedData/with_T/" + folder + "/"
 Full_Project_name = Project_name + "_" + folder
 
 # Hyperparams
-epochs_adam    = 5000
+epochs_adam    = 1000
 hidden_dim     = 128
 num_layer      = 4
 seed           = 42
@@ -184,11 +186,15 @@ pinn_model = NormalizedPINNs(base_pinn, coord_mean, coord_std, out_mean, out_std
 loss_weights = make_loss_weights(15, device)
 
 adam_optimizer = Adam(
-    [
-        {"params": pinn_model.parameters(), "lr": lr_adam},
-        {"params": [loss_weights],          "lr": lr_weights},
-    ],
+    pinn_model.parameters(),
+    lr=lr_adam,
     betas=(0.99, 0.999),
+)
+adam_weights = Adam(
+    [loss_weights],
+    lr=lr_weights,
+    betas=(0.99, 0.999),
+    maximize=True,
 )
 adam_lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
     adam_optimizer, gamma=lr_decay_rate
@@ -345,6 +351,7 @@ for epoch in range(epochs_adam):
 
     pinn_model.train()
     adam_optimizer.zero_grad()
+    adam_weights.zero_grad()
 
     train_fields = pinn_model(train_points)
     (
@@ -415,7 +422,8 @@ for epoch in range(epochs_adam):
     ])
 
     loss_total.backward()
-    adam_optimizer.step()
+    adam_optimizer.step()   # minimise L pour θ
+    adam_weights.step()     # maximise L pour w
     adam_lr_scheduler.step()
 
     training_loss_track.append(loss_total.item())
