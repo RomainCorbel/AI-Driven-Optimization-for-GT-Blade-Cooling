@@ -1,0 +1,14 @@
+#!/bin/bash -l
+
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=1
+#SBATCH --time=00:05:00
+#SBATCH --gres=gpu:1
+#SBATCH --output=../logs.txt
+#SBATCH --qos=build
+
+source /home/corbel/miniconda3/etc/profile.d/conda.sh
+conda activate blade-cooling
+cd /home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/src
+srun python pinn_all.py

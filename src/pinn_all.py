@@ -385,14 +385,14 @@ def get_loss(
 # ═════════════════════════════════════════════════════════════════════════════
 
 folder           = "dp11"
-Project_name     = "PINNs-ALL"
+Project_name     = "PINNs-ALL_scitas"
 device           = "cuda"
 debug            = False
 
 data_folder      = "./preProcessedData/with_T/" + folder + "/"
 Full_Project_name = Project_name + "_" + folder
 
-epochs_adam    = 3000
+epochs_adam    = 3
 hidden_dim     = 128
 num_layer      = 4
 seed           = 42
