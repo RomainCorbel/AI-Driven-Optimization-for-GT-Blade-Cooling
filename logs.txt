@@ -1,0 +1,25 @@
+
+Lmod is automatically replacing "gcc/11.3.0" with "intel/2021.6.0".
+
+
+Lmod is automatically replacing "intel/2021.6.0" with "nvhpc/23.3-mpi".
+
+Using device: cuda
+Coord mean: [0.48097289763277484, 0.08777413587778102, 0.011334244102755646]
+Coord std:  [0.2783405408863218, 0.05701961026948852, 0.00941359000104804]
+Output mean: [31.27008180257209, -0.03905995977294759, -0.00022490824057996286, 0.8376467141415622, 0.298149994]
+Output std:  [17.432868186313385, 0.09864005464980533, 0.06641517278762007, 0.0017006922313924247, 0.0]
+Number of Outlet surface points: 1000, Number of volume points: 5000, Number of Wall surface points: 3000
+============================================================
+Adam optimizer
+============================================================
+[Adam] 1/1
+  Val Div: 5.9345e+04  X-Mom: 3.3978e+08  Outlet p: 1.2132e-05  Wall: 3.4088e+07  Total: 6.3639e+09  Val MSE(vx/vy/vz/p/T): 5.35e+03/2.90e-01/1.77e-01/3.12e-05/3.26e+01
+Number of Outlet surface points: 2500, Number of volume points: 12500, Number of Wall surface points: 7500
+  Div: 6.5236e+04  X-Mom: 3.3622e+08  Wall vx: 5.6854e+03  Total: 6.4808e+09  Weights: ['1.001', '1.001', '1.001', '1.001', '1.001', '1.001', '0.999', '0.999', '0.999', '1.001', '1.001', '0.999', '0.999', '1.001', '0.999', '0.999', '0.999', '0.999', '0.999']
+Time taken for training: 4.4s
+vx - Train RMSE: 7.1197e+01  Test RMSE: 7.0411e+01
+vy - Train RMSE: 5.0549e-01  Test RMSE: 5.1145e-01
+vz - Train RMSE: 4.1753e-01  Test RMSE: 4.1103e-01
+p - Train RMSE: 5.2586e-03  Test RMSE: 5.2587e-03
+T - Train RMSE: 5.5350e+03  Test RMSE: 5.5809e+03
