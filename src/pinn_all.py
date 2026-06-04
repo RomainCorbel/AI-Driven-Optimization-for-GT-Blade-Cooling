@@ -352,6 +352,7 @@ def get_loss(
     ) ** 2)
 
     alpha = thermal_conductivity / (density * specific_heat)
+    
     loss_heat = torch.mean((
         alpha * (T_xx[interior] + T_yy[interior] + T_zz[interior])
         + vx[interior] * T_x[interior] + vy[interior] * T_y[interior] + vz[interior] * T_z[interior]
