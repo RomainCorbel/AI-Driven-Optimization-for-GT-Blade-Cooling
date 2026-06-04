@@ -4,7 +4,9 @@ import random
 import torch
 import torch.nn as nn
 import os
-import plotly.graph_objects as go
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import time
 import wandb
 from git import Repo
@@ -15,24 +17,38 @@ torch.set_default_dtype(torch.float64)
 # ═════════════════════════════════════════════════════════════════════════════
 # CONSTANTS
 # ═════════════════════════════════════════════════════════════════════════════
+# =============================================================================
+# CONSTANTS
+# =============================================================================
 
-p_outlet            = (101325 - 17825) / (10**5)
-T_ref_const         = 298.15
-mu_ref              = 1.716e-5
-S                   = 110.4
-M                   = 28.96 / 1000
-R                   = 8.314
-rho                 = ((p_outlet * 10**5) * M) / (R * T_ref_const)
-thermal_conductivity = 2.61e-02
-specific_heat       = 1.00e03
-density             = 9.7118e-01
-T_inlet             = 293.15
-T_wall              = 298.14
+# --- Boundary conditions (fixed inputs) ---
+T_inlet  = 298.15          # [K]  Inlet temperature (25 deg)
+T_wall   = 298.15          # [K]  Wall temperature (25 deg)
+
+P_ATM    = 101_325         # [Pa] Standard atmospheric pressure
+P_GAUGE  = 17_825          # [Pa] Gauge pressure offset
+p_outlet = 0.835           # [bar]  Outlet static pressure boundary condition (= 83500 Pa)
+
+# --- Air thermophysical properties (constant, from literature) ---
+M                    = 28.96e-3    # [kg/mol]  Molar mass of air
+R                    = 8.314       # [J/mol/K] Universal gas constant
+thermal_conductivity = 2.61e-2     # [W/m/K]   Air thermal conductivity
+specific_heat        = 1.00e3      # [J/kg/K]  Air specific heat capacity (cp)
+
+# --- Sutherland's law reference values ---
+T_ref_const = 278.15   # [K]       Reference temperature
+mu_ref      = 1.716e-5 # [Pa·s]    Dynamic viscosity at T_ref
+S           = 110.4    # [K]       Sutherland constant
+
+# --- Derived constant (computed once from the above) ---
+# Ideal gas law: rho = p / (r_specific * T), with r_specific = R/M
+r_specific = R / M                                      # [J/kg/K]
+rho    = (p_outlet * 1e5) * M / (R * T_ref_const)  # [kg/m³]  ≈ 0.9718
+alpha = thermal_conductivity / (rho * specific_heat)
 
 # ═════════════════════════════════════════════════════════════════════════════
 # GEOMETRY SAMPLING  (labels: 0=interior, 1=inlet, 2=outlet, 3=wall)
 # ═════════════════════════════════════════════════════════════════════════════
-
 def get_inlet_surface_points(obj, num_points):
     threshold = 1e-5
     faces_x_zero = [
@@ -128,100 +144,51 @@ def dynamic_viscosity(T, mu_ref=1.716e-5, T_ref=273.15, S=110.4):
 # PLOTTING
 # ═════════════════════════════════════════════════════════════════════════════
 
-def plot_fields(fields, validation_points, train=False):
-    output_dir = "../run"
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    for name, scalar_field in fields:
-        pts = validation_points
-        if isinstance(pts, torch.Tensor):
-            pts = pts.detach().cpu().numpy()
-        if isinstance(scalar_field, torch.Tensor):
-            scalar_field = scalar_field.detach().cpu().numpy()
-        fig = go.Figure(data=[go.Scatter3d(
-            x=pts[:, 0], y=pts[:, 1], z=pts[:, 2],
-            mode="markers",
-            marker=dict(size=5, color=scalar_field, colorscale="Viridis",
-                        colorbar=dict(title=name)),
-        )])
-        fig.update_layout(scene=dict(xaxis_title="X", yaxis_title="Y", zaxis_title="Z",
-                                     aspectmode="data"), title=name)
-        fname = f"{name}_train.html" if train else f"{name}.html"
-        fig.write_html(os.path.join(output_dir, fname))
+def plot_fields(pts, fields, output_dir="../run", suffix_tag=""):
+    os.makedirs(output_dir, exist_ok=True)
 
+    def to_np(x):
+        if x is None:
+            return None
+        return x.detach().cpu().numpy() if isinstance(x, torch.Tensor) else np.asarray(x)
 
-def plot_aginast_data(folder_path, vx_pred, vy_pred, vz_pred, p_pred, T_pred):
-    vx       = np.load(os.path.join(folder_path, "vel_x.npy"))
-    vx_inlet = np.load(os.path.join(folder_path, "vel_x_inlet.npy"))
-    vy       = np.load(os.path.join(folder_path, "vel_y.npy"))
-    vy_inlet = np.load(os.path.join(folder_path, "vel_y_inlet.npy"))
-    vz       = np.load(os.path.join(folder_path, "vel_z.npy"))
-    vz_inlet = np.load(os.path.join(folder_path, "vel_z_inlet.npy"))
-    p        = np.load(os.path.join(folder_path, "press.npy"))
-    T        = np.load(os.path.join(folder_path, "temp.npy"))
-    all_points = np.concatenate((vx_inlet[:, :3], vx[:, :3]))
+    pts_np = to_np(pts)
+    n_pts  = min(15000, len(pts_np))
+    idx    = np.random.choice(len(pts_np), n_pts, replace=False)
+    p      = pts_np[idx]
 
-    all_indices        = torch.arange(vx.shape[0])
-    supervised_indices = torch.tensor(
-        np.load(os.path.join("indices.npy")), dtype=torch.long
-    )
-    test_indices = torch.tensor(
-        list(set(all_indices.tolist()) - set(supervised_indices.tolist()))
-    )
+    for name, data_raw, pred_raw in fields:
+        data     = to_np(data_raw)
+        pred     = to_np(pred_raw)
+        has_data = data is not None
 
-    _fields = [
-        [vx_inlet, vx, vx_pred, "vx"],
-        [vy_inlet, vy, vy_pred, "vy"],
-        [vz_inlet, vz, vz_pred, "vz"],
-    ]
-    for _field in _fields:
-        scalar_field = np.concatenate((_field[0][:, 3], _field[1][:, 3]))
-        index = np.random.choice(all_points.shape[0], 100000, replace=False)
-        sel_pts   = all_points[index]
-        sel_true  = scalar_field[index]
-        sel_pred  = _field[2][index]
-        for title, color in [
-            (f"Diff in true and pred for {_field[3]}", sel_true - sel_pred),
-            (f"Data for {_field[3]}",                 sel_true),
-        ]:
-            fig = go.Figure(data=[go.Scatter3d(
-                x=sel_pts[:, 0], y=sel_pts[:, 1], z=sel_pts[:, 2], mode="markers",
-                marker=dict(size=5, color=color, colorscale="Viridis",
-                            colorbar=dict(title=_field[3])),
-            )])
-            fig.update_layout(scene=dict(xaxis_title="X", yaxis_title="Y", zaxis_title="Z",
-                                         aspectmode="data"), title=title)
-            suffix = "diff" if "Diff" in title else "data"
-            fig.write_html(f"../run/{_field[3]}_{suffix}.html")
-        sup_rmse  = np.sqrt(np.mean((_field[1][:, 3][supervised_indices] - _field[2][supervised_indices]) ** 2))
-        test_rmse = np.sqrt(np.mean((_field[1][:, 3][test_indices]       - _field[2][test_indices])       ** 2))
-        print(f"{_field[3]} - Train RMSE: {sup_rmse}, Test RMSE: {test_rmse}")
+        vmin = float(min(data.min(), pred.min()) if has_data else pred.min())
+        vmax = float(max(data.max(), pred.max()) if has_data else pred.max())
 
-    for tag, scalar_raw, pred_slice in [
-        ("p", p[:, 3] / 1e5, p_pred[vx_inlet.shape[0]:]),
-        ("T", T[:, 3],       T_pred[vx_inlet.shape[0]:]),
-    ]:
-        index = np.random.choice(vx[:, :3].shape[0], 50000, replace=False)
-        sel_pts  = vx[:, :3][index]
-        sel_true = scalar_raw[index]
-        sel_pred = pred_slice[index]
-        for title, color in [
-            (f"Diff in true and pred for {tag}", sel_true - sel_pred),
-            (f"Data for {tag}",                  sel_true),
-        ]:
-            fig = go.Figure(data=[go.Scatter3d(
-                x=sel_pts[:, 0], y=sel_pts[:, 1], z=sel_pts[:, 2], mode="markers",
-                marker=dict(size=5, color=color, colorscale="Viridis",
-                            colorbar=dict(title=tag)),
-            )])
-            fig.update_layout(scene=dict(xaxis_title="X", yaxis_title="Y", zaxis_title="Z",
-                                         aspectmode="data"), title=title)
-            suffix = "diff" if "Diff" in title else "data"
-            fig.write_html(f"../run/{tag}_{suffix}.html")
-        sup_rmse  = np.sqrt(np.mean((scalar_raw[supervised_indices] - pred_slice[supervised_indices]) ** 2))
-        test_rmse = np.sqrt(np.mean((scalar_raw[test_indices]       - pred_slice[test_indices])       ** 2))
-        print(f"{tag} - Train RMSE: {sup_rmse}, Test RMSE: {test_rmse}")
+        subplots = []
+        if has_data:
+            subplots.append((f"Data – {name}", data,        vmin, vmax))
+        subplots.append(    (f"Pred – {name}", pred,        vmin, vmax))
+        if has_data:
+            subplots.append((f"Diff – {name}", data - pred, None, None))
 
+        n = len(subplots)
+        fig, axes = plt.subplots(1, n, figsize=(6 * n, 5), subplot_kw={"projection": "3d"})
+        if n == 1:
+            axes = [axes]
+
+        for ax, (title, color, cmin, cmax) in zip(axes, subplots):
+            sc = ax.scatter(p[:, 0], p[:, 1], p[:, 2],
+                            c=color[idx], cmap="viridis",
+                            vmin=cmin, vmax=cmax, s=1, rasterized=True)
+            ax.set_title(title, fontsize=10)
+            ax.set_xlabel("X"); ax.set_ylabel("Y"); ax.set_zlabel("Z")
+            plt.colorbar(sc, ax=ax, shrink=0.5, label=name)
+
+        fig.tight_layout()
+        tag = f"_{suffix_tag}" if suffix_tag else ""
+        fig.savefig(os.path.join(output_dir, f"{name}{tag}.png"), dpi=120, bbox_inches="tight")
+        plt.close(fig)
 
 # ═════════════════════════════════════════════════════════════════════════════
 # MODEL
@@ -257,13 +224,12 @@ class NormalizedPINNs(nn.Module):
         out_norm = self.pinn(x_norm)
         safe_std = torch.where(self.out_std == 0, torch.ones_like(self.out_std), self.out_std)
         return out_norm * safe_std + self.out_mean
-
-
+    
 def init_weights(m):
     if isinstance(m, nn.Linear):
-        nn.init.xavier_uniform_(m.weight)
-        m.bias.data.fill_(0.01)
-
+        a = 0.7 # 2 * 1.0 / m.weight.size(1) ** 0.5         # let s try to initial the weights uniformly instead of putting 0, that was satisfying some losses for no reason!
+        nn.init.uniform_(m.weight, -a, a)
+        nn.init.uniform_(m.bias,   -a, a)
 
 def make_loss_weights(n, device):
     return nn.Parameter(torch.ones(n, dtype=torch.float64, device=device))
@@ -322,7 +288,7 @@ def get_loss(
     labels,
     p_outlet_val,
     vx_inlet, vy_inlet, vz_inlet, T_inlet_val,
-    T_wall_val,
+    T_wall_val, alpha
 ):
     interior = labels == 0   # PDE residuals everywhere inside
     inlet    = labels == 1
@@ -350,32 +316,29 @@ def get_loss(
         + (10**5 / rho) * p_z[interior]
         - (mu[interior] / rho) * (vz_xx[interior] + vz_yy[interior] + vz_zz[interior])
     ) ** 2)
-
-    alpha = thermal_conductivity / (density * specific_heat)
     
     loss_heat = torch.mean((
         alpha * (T_xx[interior] + T_yy[interior] + T_zz[interior])
         + vx[interior] * T_x[interior] + vy[interior] * T_y[interior] + vz[interior] * T_z[interior]
-    ) ** 2) / 10**6
+    ) ** 2) / 10**6 # (to keep it in a similar range as the other losses, ex: vx * T_x  ≈  50 m/s  ×  1000 K/m  =  50,000 K/s so residual² ≈ (50,000)² = 2.5×10⁹ / 10⁶ = 2,500 comparable to momentum losses)
 
-    loss_inlet_vx = torch.mean((vx[inlet] - vx_inlet) ** 2)
-    loss_inlet_vy = torch.mean((vy[inlet] - vy_inlet) ** 2)
-    loss_inlet_vz = torch.mean((vz[inlet] - vz_inlet) ** 2)
-    loss_inlet_T  = torch.mean((T[inlet]  - T_inlet_val) ** 2) / 10**6
+    loss_inlet_vx = torch.mean((vx[inlet].squeeze(1) - vx_inlet) ** 2)
+    loss_inlet_vy = torch.mean((vy[inlet].squeeze(1) - vy_inlet) ** 2)
+    loss_inlet_vz = torch.mean((vz[inlet].squeeze(1) - vz_inlet) ** 2)
+    loss_inlet_T  = torch.mean((T[inlet]  - T_inlet_val) ** 2) # deleted /10^6 to keep it in a similar range as the other losses (inlet T error is typically around 10 K, so squared error is around 100, which is comparable to momentum losses), dividing by 10^6 is too much and makes the loss very small and hard to optimize
 
     loss_outlet_p = torch.mean((p[outlet] - p_outlet_val) ** 2)
 
     loss_wall_vx = torch.mean(vx[wall] ** 2)
     loss_wall_vy = torch.mean(vy[wall] ** 2)
     loss_wall_vz = torch.mean(vz[wall] ** 2)
-    loss_wall_T  = torch.mean((T[wall] - T_wall_val) ** 2) / 10**6
+    loss_wall_T  = torch.mean((T[wall] - T_wall_val) ** 2)
 
     return (
         loss_divergence,
         loss_momentum_x, loss_momentum_y, loss_momentum_z,
         loss_heat,
-        loss_inlet_vx, loss_inlet_vy, loss_inlet_vz, loss_inlet_T,
-        loss_outlet_p,
+        loss_inlet_vx, loss_inlet_vy, loss_inlet_vz, loss_outlet_p, loss_inlet_T,
         loss_wall_vx, loss_wall_vy, loss_wall_vz, loss_wall_T,
     )
 
@@ -387,12 +350,12 @@ def get_loss(
 folder           = "dp11"
 Project_name     = "PINNs-ALL_scitas"
 device           = "cuda"
-debug            = False
+debug            = True
 
 data_folder      = "./preProcessedData/with_T/" + folder + "/"
 Full_Project_name = Project_name + "_" + folder
 
-epochs_adam    = 3
+epochs_adam    = 1
 hidden_dim     = 128
 num_layer      = 4
 seed           = 42
@@ -421,8 +384,7 @@ n_inlet_pts_4_validation           = int(0.1  * Num_points_used_for_validation_p
 
 LOSSES = [
     "divergence", "momentum_x", "momentum_y", "momentum_z", "heat_equation",
-    "inlet_vx_boundary", "inlet_vy_boundary", "inlet_vz_boundary", "inlet_temp_boundary",
-    "outlet_p_boundary",
+    "inlet_vx_boundary", "inlet_vy_boundary", "inlet_vz_boundary", "outlet_p_boundary", "inlet_temp_boundary",
     "wall_vx_boundary", "wall_vy_boundary", "wall_vz_boundary", "wall_temp_boundary",
     "supervised_vx", "supervised_vy", "supervised_vz", "supervised_p", "supervised_T",
 ]
@@ -593,8 +555,7 @@ def run_validation():
         val_loss_divergence,
         val_loss_momentum_x, val_loss_momentum_y, val_loss_momentum_z,
         val_loss_heat,
-        val_loss_inlet_vx, val_loss_inlet_vy, val_loss_inlet_vz, val_loss_inlet_T,
-        val_loss_outlet_p,
+        val_loss_inlet_vx, val_loss_inlet_vy, val_loss_inlet_vz, val_loss_outlet_p, val_loss_inlet_T,
         val_loss_wall_vx, val_loss_wall_vy, val_loss_wall_vz, val_loss_wall_T,
     ) = get_loss(
         vx, vy, vz, p, T,
@@ -605,7 +566,7 @@ def run_validation():
         T_x, T_y, T_z, T_xx, T_yy, T_zz,
         val_labels_combined,
         p_outlet,
-        vx_inlet_data, vy_inlet_data, vz_inlet_data, T_inlet, T_wall,
+        vx_inlet_data, vy_inlet_data, vz_inlet_data, T_inlet, T_wall, alpha
     )
 
     val_loss_total = (
@@ -720,8 +681,7 @@ for epoch in range(epochs_adam):
         loss_divergence,
         loss_momentum_x, loss_momentum_y, loss_momentum_z,
         loss_heat,
-        loss_inlet_vx, loss_inlet_vy, loss_inlet_vz, loss_inlet_T,
-        loss_outlet_p,
+        loss_inlet_vx, loss_inlet_vy, loss_inlet_vz, loss_outlet_p, loss_inlet_T,
         loss_wall_vx, loss_wall_vy, loss_wall_vz, loss_wall_T,
     ) = get_loss(
         vx, vy, vz, p, T,
@@ -732,7 +692,7 @@ for epoch in range(epochs_adam):
         T_x, T_y, T_z, T_xx, T_yy, T_zz,
         all_train_labels,
         p_outlet,
-        vx_inlet_data, vy_inlet_data, vz_inlet_data, T_inlet, T_wall,
+        vx_inlet_data, vy_inlet_data, vz_inlet_data, T_inlet, T_wall, alpha
     )
 
     if num_supervised_train_points > 0:
@@ -741,7 +701,7 @@ for epoch in range(epochs_adam):
         sup_vy = torch.mean((fields_supervised[:, 1] - vy_sampled_data) ** 2)
         sup_vz = torch.mean((fields_supervised[:, 2] - vz_sampled_data) ** 2)
         sup_p  = torch.mean((fields_supervised[:, 3] - p_sampled_data)  ** 2)
-        sup_T  = torch.mean((fields_supervised[:, 4] * 1000 - temp_sampled_data) ** 2) / 10**6
+        sup_T  = torch.mean((fields_supervised[:, 4] * 1000 - temp_sampled_data) ** 2)
     else:
         _zero = torch.zeros(1, dtype=torch.float64, device=device).squeeze().detach()
         sup_vx = sup_vy = sup_vz = sup_p = sup_T = _zero
@@ -750,8 +710,7 @@ for epoch in range(epochs_adam):
         loss_divergence,
         loss_momentum_x, loss_momentum_y, loss_momentum_z,
         loss_heat,
-        loss_inlet_vx, loss_inlet_vy, loss_inlet_vz, loss_inlet_T,
-        loss_outlet_p,
+        loss_inlet_vx, loss_inlet_vy, loss_inlet_vz, loss_outlet_p, loss_inlet_T,
         loss_wall_vx, loss_wall_vy, loss_wall_vz, loss_wall_T,
         sup_vx, sup_vy, sup_vz, sup_p, sup_T,
     ])
@@ -814,23 +773,6 @@ torch.save(pinn_model.state_dict(), "../run/pinn_model_v5.pt")
 torch.save(loss_weights.detach().cpu(), "../run/loss_weights_v5.pt")
 
 # ═════════════════════════════════════════════════════════════════════════════
-# PLOTTING (training collocation points)
-# ═════════════════════════════════════════════════════════════════════════════
-
-pinn_model.eval()
-with torch.no_grad():
-    validation_fields = pinn_model(validation_points)
-
-fields = [
-    ("vx", validation_fields[:, 0].cpu().detach().numpy()),
-    ("vy", validation_fields[:, 1].cpu().detach().numpy()),
-    ("vz", validation_fields[:, 2].cpu().detach().numpy()),
-    ("p",  validation_fields[:, 3].cpu().detach().numpy()),
-    ("T",  validation_fields[:, 4].cpu().detach().numpy() * 1000),
-]
-plot_fields(fields, validation_points)
-
-# ═════════════════════════════════════════════════════════════════════════════
 # INFERENCE  (CPU, full domain)
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -846,33 +788,65 @@ pinn_model_inf.load_state_dict(
     torch.load("../run/pinn_model_v5.pt", weights_only=True, map_location="cpu")
 )
 
-all_points = torch.tensor(np.concatenate((
-    np.load(os.path.join(data_folder, "vel_x_inlet.npy"))[:, :3],
-    np.load(os.path.join(data_folder, "vel_x.npy"))[:, :3],
-)))
+vx_full    = np.load(os.path.join(data_folder, "vel_x.npy"))
+vx_in_full = np.load(os.path.join(data_folder, "vel_x_inlet.npy"))
+vy_full    = np.load(os.path.join(data_folder, "vel_y.npy"))
+vy_in_full = np.load(os.path.join(data_folder, "vel_y_inlet.npy"))
+vz_full    = np.load(os.path.join(data_folder, "vel_z.npy"))
+vz_in_full = np.load(os.path.join(data_folder, "vel_z_inlet.npy"))
+p_full     = np.load(os.path.join(data_folder, "press.npy"))
+T_full     = np.load(os.path.join(data_folder, "temp.npy"))
 
-all_fields = pinn_model_inf(all_points)
-vx_pred = all_fields[:, 0].cpu().detach().numpy()
-vy_pred = all_fields[:, 1].cpu().detach().numpy()
-vz_pred = all_fields[:, 2].cpu().detach().numpy()
-p_pred  = all_fields[:, 3].cpu().detach().numpy()
-T_pred  = (all_fields[:, 4] * 1000).cpu().detach().numpy()
+all_points = torch.tensor(np.concatenate((vx_in_full[:, :3], vx_full[:, :3])))
+all_fields_pred = pinn_model_inf(all_points)
+vx_pred = all_fields_pred[:, 0].detach().numpy()
+vy_pred = all_fields_pred[:, 1].detach().numpy()
+vz_pred = all_fields_pred[:, 2].detach().numpy()
+p_pred  = all_fields_pred[:, 3].detach().numpy()
+T_pred  = (all_fields_pred[:, 4] * 1000).detach().numpy()
 
-plot_aginast_data(data_folder, vx_pred, vy_pred, vz_pred, p_pred, T_pred)
+sup_idx_np  = train_pool_idx.cpu().numpy()
+test_idx_np = test_idx.cpu().numpy()
+n_inlet     = vx_in_full.shape[0]
+
+all_pts_np = np.concatenate((vx_in_full[:, :3], vx_full[:, :3]))
+index_vel  = np.random.choice(all_pts_np.shape[0], min(100000, all_pts_np.shape[0]), replace=False)
+vel_fields = []
+for inlet, body, pred_arr, name in [
+    (vx_in_full, vx_full, vx_pred, "vx"),
+    (vy_in_full, vy_full, vy_pred, "vy"),
+    (vz_in_full, vz_full, vz_pred, "vz"),
+]:
+    true_all = np.concatenate((inlet[:, 3], body[:, 3]))
+    vel_fields.append((name, true_all[index_vel], pred_arr[index_vel]))
+    print(f"{name} - Train RMSE: {np.sqrt(np.mean((body[:, 3][sup_idx_np]  - pred_arr[sup_idx_np])  ** 2)):.4e}  "
+          f"Test RMSE: {np.sqrt(np.mean((body[:, 3][test_idx_np] - pred_arr[test_idx_np]) ** 2)):.4e}")
+plot_fields(all_pts_np[index_vel], vel_fields)
+
+index_sc = np.random.choice(vx_full.shape[0], min(50000, vx_full.shape[0]), replace=False)
+sc_fields = []
+for tag, scalar_raw, pred_slice in [
+    ("p", p_full[:, 3] / 1e5, p_pred[n_inlet:]),
+    ("T", T_full[:, 3],       T_pred[n_inlet:]),
+]:
+    sc_fields.append((tag, scalar_raw[index_sc], pred_slice[index_sc]))
+    print(f"{tag} - Train RMSE: {np.sqrt(np.mean((scalar_raw[sup_idx_np]  - pred_slice[sup_idx_np])  ** 2)):.4e}  "
+          f"Test RMSE: {np.sqrt(np.mean((scalar_raw[test_idx_np] - pred_slice[test_idx_np]) ** 2)):.4e}")
+plot_fields(vx_full[:, :3][index_sc], sc_fields)
 
 # ═════════════════════════════════════════════════════════════════════════════
 # COMMIT + PUSH
 # ═════════════════════════════════════════════════════════════════════════════
-if repo.is_dirty(untracked_files=True):
-    print("Repository has changes, preparing to commit.")
-    repo.git.add(A=True)
-    commit_message = (
-        f"Running job with run name: {run.name}, url: {run.url}"
-        if not debug else "Running job (debug mode)"
-    )
-    repo.index.commit(commit_message)
-    print(f"Committed changes with message: {commit_message}")
-    repo.remote(name="origin").push()
-    print("Pushed changes to the remote repository.")
-else:
-    print("No changes to commit.")
+# if repo.is_dirty(untracked_files=True):
+#     print("Repository has changes, preparing to commit.")
+#     repo.git.add(A=True)
+#     commit_message = (
+#         f"Running job with run name: {run.name}, url: {run.url}"
+#         if not debug else "Running job (debug mode)"
+#     )
+#     repo.index.commit(commit_message)
+#     print(f"Committed changes with message: {commit_message}")
+#     repo.remote(name="origin").push()
+#     print("Pushed changes to the remote repository.")
+# else:
+#     print("No changes to commit.")
