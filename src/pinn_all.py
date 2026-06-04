@@ -391,8 +391,8 @@ debug            = False
 data_folder      = "./preProcessedData/with_T/" + folder + "/"
 Full_Project_name = Project_name + "_" + folder
 
-epochs_adam    = 500
-hidden_dim     = 20
+epochs_adam    = 3000
+hidden_dim     = 128
 num_layer      = 4
 seed           = 42
 lr_adam        = 1e-3
@@ -400,9 +400,9 @@ lr_weights     = 1e-3
 lr_final       = 1e-7
 lr_decay_rate  = (lr_final / lr_adam) ** (1.0 / epochs_adam)
 
-testing_factor = 5
+testing_factor = 50
 
-Num_points_used_for_testing    = 10000 * testing_factor
+Num_points_used_for_testing    = 100 * testing_factor
 Num_points_used_for_training_per_epoch = 500 * testing_factor # per epoch because all the points that are not in the test set are in the training set, and we sample a new subset of them every epoch
 
 num_supervised_train_points    = int(0.1  * Num_points_used_for_training_per_epoch)
@@ -853,8 +853,6 @@ plot_aginast_data(data_folder, vx_pred, vy_pred, vz_pred, p_pred, T_pred)
 # ═════════════════════════════════════════════════════════════════════════════
 # COMMIT + PUSH
 # ═════════════════════════════════════════════════════════════════════════════
-
-time.sleep(120)
 if repo.is_dirty(untracked_files=True):
     print("Repository has changes, preparing to commit.")
     repo.git.add(A=True)
