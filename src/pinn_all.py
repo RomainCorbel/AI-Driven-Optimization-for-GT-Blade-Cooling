@@ -405,7 +405,7 @@ testing_factor = 50
 Num_points_used_for_testing    = 100 * testing_factor
 Num_points_used_for_training_per_epoch = 500 * testing_factor # per epoch because all the points that are not in the test set are in the training set, and we sample a new subset of them every epoch
 
-num_supervised_train_points    = int(0.1  * Num_points_used_for_training_per_epoch)
+num_supervised_train_points    = 0 # int(0.1  * Num_points_used_for_training_per_epoch)
 Num_points_used_for_validation_per_epoch = 200 * testing_factor
 
 n_volume_pts_4_training          = int(0.5  * Num_points_used_for_training_per_epoch)
@@ -734,12 +734,16 @@ for epoch in range(epochs_adam):
         vx_inlet_data, vy_inlet_data, vz_inlet_data, T_inlet, T_wall,
     )
 
-    fields_supervised = pinn_model(sampled_points)
-    sup_vx = torch.mean((fields_supervised[:, 0] - vx_sampled_data) ** 2)
-    sup_vy = torch.mean((fields_supervised[:, 1] - vy_sampled_data) ** 2)
-    sup_vz = torch.mean((fields_supervised[:, 2] - vz_sampled_data) ** 2)
-    sup_p  = torch.mean((fields_supervised[:, 3] - p_sampled_data)  ** 2)
-    sup_T  = torch.mean((fields_supervised[:, 4] * 1000 - temp_sampled_data) ** 2) / 10**6
+    if num_supervised_train_points > 0:
+        fields_supervised = pinn_model(sampled_points)
+        sup_vx = torch.mean((fields_supervised[:, 0] - vx_sampled_data) ** 2)
+        sup_vy = torch.mean((fields_supervised[:, 1] - vy_sampled_data) ** 2)
+        sup_vz = torch.mean((fields_supervised[:, 2] - vz_sampled_data) ** 2)
+        sup_p  = torch.mean((fields_supervised[:, 3] - p_sampled_data)  ** 2)
+        sup_T  = torch.mean((fields_supervised[:, 4] * 1000 - temp_sampled_data) ** 2) / 10**6
+    else:
+        _zero = torch.zeros(1, dtype=torch.float64, device=device).squeeze().detach()
+        sup_vx = sup_vy = sup_vz = sup_p = sup_T = _zero
 
     loss_total = weighted_total_loss([
         loss_divergence,
@@ -773,22 +777,27 @@ for epoch in range(epochs_adam):
         "loss_wall_vy":       np.log10(loss_wall_vy.item()),
         "loss_wall_vz":       np.log10(loss_wall_vz.item()),
         "loss_wall_T":        np.log10(loss_wall_T.item()),
-        "loss_supervised_vx": np.log10(sup_vx.item()),
-        "loss_supervised_vy": np.log10(sup_vy.item()),
-        "loss_supervised_vz": np.log10(sup_vz.item()),
-        "loss_supervised_p":  np.log10(sup_p.item()),
-        "loss_supervised_T":  np.log10(sup_T.item()),
+        "loss_supervised_vx": safe_log10(sup_vx),
+        "loss_supervised_vy": safe_log10(sup_vy),
+        "loss_supervised_vz": safe_log10(sup_vz),
+        "loss_supervised_p":  safe_log10(sup_p),
+        "loss_supervised_T":  safe_log10(sup_T),
         "loss_total":         np.log10(loss_total.item()),
         "LR": adam_lr_scheduler.get_last_lr()[0],
         **weights_log_dict(),
     }
+    train_log = {k: v for k, v in train_log.items() if v is not None}
+    sup_str = (
+        f"Sup(vx/vy/vz/p/T): "
+        f"{sup_vx.item():.2e}/{sup_vy.item():.2e}/{sup_vz.item():.2e}"
+        f"/{sup_p.item():.2e}/{sup_T.item():.2e}  "
+        if num_supervised_train_points > 0 else ""
+    )
     print(
         f"  Div: {loss_divergence.item():.4e}  "
         f"X-Mom: {loss_momentum_x.item():.4e}  "
         f"Wall vx: {loss_wall_vx.item():.4e}  "
-        f"Sup(vx/vy/vz/p/T): "
-        f"{sup_vx.item():.2e}/{sup_vy.item():.2e}/{sup_vz.item():.2e}"
-        f"/{sup_p.item():.2e}/{sup_T.item():.2e}  "
+        f"{sup_str}"
         f"Total: {loss_total.item():.4e}  "
         f"Weights: {[f'{w:.3f}' for w in loss_weights.detach().cpu().tolist()]}"
     )
