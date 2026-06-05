@@ -277,13 +277,13 @@ LR_WEIGHTS = 1e-4
 LR_MIN     = 1e-6   # cosine annealing floor
 
 N_TEST  = 10_000
-N_TRAIN = 50_000
+N_TRAIN = 5000
 N_SUP   = 500     # supervised CFD points per epoch (anchor vx on CFD data)
 
-n_vol_train    = int(0.5 * N_TRAIN)
-n_outlet_train = int(0.1 * N_TRAIN)
-n_wall_train   = int(0.3 * N_TRAIN)
-n_inlet_train  = int(0.1 * N_TRAIN)  # from CSV, not STL
+n_vol_train    = int(0.82 * N_TRAIN)
+n_outlet_train = int(0.06 * N_TRAIN)
+n_wall_train   = int(0.06 * N_TRAIN)
+n_inlet_train  = int(0.06 * N_TRAIN)  # from CSV, not STL
 
 # Must match the order passed to the weighted loss
 LOSS_NAMES = [
@@ -301,6 +301,8 @@ N_LOSSES = len(LOSS_NAMES)
 # ═══════════════════════════════════════════════════════════════
 
 if not DEBUG:
+    api_key = "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"
+    wandb.login(key=api_key)
     run = wandb.init(
         project=PROJECT_NAME,
         config={
