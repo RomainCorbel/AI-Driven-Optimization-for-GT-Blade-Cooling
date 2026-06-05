@@ -155,7 +155,7 @@ def compute_losses(
     l_inlet_vz = torch.mean((vz[inlet].squeeze(1) - vz_in) ** 2)
     l_inlet_T  = torch.mean((T[inlet] - T_in) ** 2)
     l_outlet_p = torch.mean((p[outlet] - p_out) ** 2)
-    l_wall_vx  = torch.mean(vx[wall] ** 2) -
+    l_wall_vx  = torch.mean((vx[wall] -0.8)** 2)  # as we saw that even the data are not really respecting the no slip bc (because of the mesh)
     l_wall_vy  = torch.mean(vy[wall] ** 2)
     l_wall_vz  = torch.mean(vz[wall] ** 2)
     l_wall_T   = torch.mean((T[wall] - T_w) ** 2)
@@ -171,14 +171,26 @@ def compute_losses(
 # MODEL
 # ═══════════════════════════════════════════════════════════════
 
+class Sin(nn.Module):
+    def forward(self, x):
+        return torch.sin(x)
+
+
 class FFNN(nn.Module):
     def __init__(self, in_dim, hidden_dim, out_dim, n_layers):
         super().__init__()
         layers = []
         for i in range(n_layers - 1):
-            layers += [nn.Linear(in_dim if i == 0 else hidden_dim, hidden_dim), nn.Tanh()]
+            layers += [nn.Linear(in_dim if i == 0 else hidden_dim, hidden_dim), Sin()]
         layers.append(nn.Linear(hidden_dim, out_dim))
         self.net = nn.Sequential(*layers)
+        linears = [m for m in self.net if isinstance(m, nn.Linear)]
+        for idx, lin in enumerate(linears):
+            if idx == 0:
+                nn.init.xavier_normal_(lin.weight) # (glorot normal)
+            else:
+                nn.init.kaiming_normal_(lin.weight) # (he normal)
+            nn.init.zeros_(lin.bias)
 
     def forward(self, x):
         return self.net(x)
@@ -216,7 +228,7 @@ def init_weights(m):
 # PLOTTING
 # ═══════════════════════════════════════════════════════════════
 
-def plot_fields(pts, fields, output_dir="../run_Xavier", tag=""):
+def plot_fields(pts, fields, output_dir="../RUN_PATH_Xavier", tag=""):
     os.makedirs(output_dir, exist_ok=True)
 
     def to_np(x):
@@ -267,7 +279,7 @@ DEVICE       = "cuda"
 DEBUG        = False
 
 DATA_DIR = f"./preProcessedData/with_T/{FOLDER}/"
-
+RUN_PATH = f"../RUN_PATH_Xavier_new_sin"
 EPOCHS     = 10_000
 HIDDEN_DIM = 20
 N_LAYERS   = 4
@@ -279,6 +291,7 @@ LR_MIN     = 1e-6   # cosine annealing floor
 N_TEST  = 10_000
 N_TRAIN = 5000
 N_SUP   = 500     # supervised CFD points per epoch (anchor vx on CFD data)
+N_point_snapshots = 50_000  # for plotting predicted fields at fixed points every N epochs
 
 n_vol_train    = int(0.82 * N_TRAIN)
 n_outlet_train = int(0.06 * N_TRAIN)
@@ -379,7 +392,6 @@ mesh = trimesh.load("./Baseline_ML4Science.stl")
 # ═══════════════════════════════════════════════════════════════
 
 net   = FFNN(in_dim=3, hidden_dim=HIDDEN_DIM, out_dim=5, n_layers=N_LAYERS).to(DEVICE).double()
-net.apply(init_weights)
 model = NormalizedPINN(net, coord_mean, coord_std, out_mean, out_std)
 
 weights     = nn.Parameter(torch.ones(N_LOSSES, dtype=torch.float64, device=DEVICE))
@@ -398,7 +410,7 @@ def safe_log10(x):
 
 # Fixed random subset of CFD points used for all training snapshots
 # (same points every time → plots show evolution, not sampling noise)
-_snap_n   = min(50_000, cfd_pts.shape[0])
+_snap_n   = N_POINT_SNAPSHOTS
 _snap_idx = np.random.choice(cfd_pts.shape[0], _snap_n, replace=False)
 snap_pts  = cfd_pts[_snap_idx]
 snap_vx   = cfd_vx[_snap_idx]
@@ -486,7 +498,7 @@ for epoch in range(EPOCHS):
 
     # ── Training snapshot plots ──────────────────────────────
     if epoch in plot_epochs:
-        snap_dir = f"../run_Xavier/{epoch + 1}_{EPOCHS}"
+        snap_dir = f"../RUN_PATH_Xavier/{epoch + 1}_{EPOCHS}"
         with torch.no_grad():
             pred_snap = model(snap_pts)
         plot_fields(
@@ -555,8 +567,8 @@ for epoch in range(EPOCHS):
         wandb.log(log, step=epoch)
 
 print(f"\nTraining done in {time.time() - start:.1f}s")
-torch.save(model.state_dict(),        "../run_Xavier/pinn_model_v5.pt")
-torch.save(weights.detach().cpu(),    "../run_Xavier/loss_weights_v5.pt")
+torch.save(model.state_dict(),        "../RUN_PATH_Xavier/pinn_model_v5.pt")
+torch.save(weights.detach().cpu(),    "../RUN_PATH_Xavier/loss_weights_v5.pt")
 
 # ═══════════════════════════════════════════════════════════════
 # INFERENCE  (CPU, full domain)
@@ -565,7 +577,7 @@ torch.save(weights.detach().cpu(),    "../run_Xavier/loss_weights_v5.pt")
 torch.set_default_device("cpu")
 net_inf   = FFNN(in_dim=3, hidden_dim=HIDDEN_DIM, out_dim=5, n_layers=N_LAYERS)
 model_inf = NormalizedPINN(net_inf, coord_mean.cpu(), coord_std.cpu(), out_mean.cpu(), out_std.cpu())
-model_inf.load_state_dict(torch.load("../run_Xavier/pinn_model_v5.pt", weights_only=True, map_location="cpu"))
+model_inf.load_state_dict(torch.load("../RUN_PATH_Xavier/pinn_model_v5.pt", weights_only=True, map_location="cpu"))
 model_inf.eval()
 
 vx_in_full = np.load(DATA_DIR + "vel_x_inlet.npy")
