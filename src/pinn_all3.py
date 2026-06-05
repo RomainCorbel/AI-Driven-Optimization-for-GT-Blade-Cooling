@@ -287,7 +287,10 @@ SEED       = 42
 LR         = 1e-3
 LR_WEIGHTS = 1e-4
 LR_MIN     = 1e-6   # cosine annealing floor
+T_0 = 2000  # Scheduler T_0
+N_mult = 2
 
+# Must match the order passed to the weighted loss
 N_TEST  = 10_000
 N_TRAIN = 5000
 N_SUP   = 500     # supervised CFD points per epoch (anchor vx on CFD data)
@@ -298,7 +301,6 @@ n_outlet_train = int(0.06 * N_TRAIN)
 n_wall_train   = int(0.06 * N_TRAIN)
 n_inlet_train  = int(0.06 * N_TRAIN)  # from CSV, not STL
 
-# Must match the order passed to the weighted loss
 LOSS_NAMES = [
     "divergence",
     "momentum_x", "momentum_y", "momentum_z",
@@ -320,7 +322,7 @@ if not DEBUG:
         project=PROJECT_NAME,
         config={
             "epochs": EPOCHS, "lr": LR, "lr_weights": LR_WEIGHTS,
-            "lr_min": LR_MIN, "scheduler": "cosine_warm_restarts", "T_0": 2000, "T_mult": 2,
+            "lr_min": LR_MIN, "scheduler": "cosine_warm_restarts", "T_0": T_0, "T_mult": T_mult,
             "hidden_dim": HIDDEN_DIM, "n_layers": N_LAYERS, "seed": SEED,
             "n_train": N_TRAIN, "n_test": N_TEST, "n_supervised": N_SUP,
             "n_vol_train": n_vol_train, "n_outlet_train": n_outlet_train,
@@ -397,7 +399,7 @@ model = NormalizedPINN(net, coord_mean, coord_std, out_mean, out_std)
 weights     = nn.Parameter(torch.ones(N_LOSSES, dtype=torch.float64, device=DEVICE))
 opt_model   = Adam(model.parameters(), lr=LR,         betas=(0.99, 0.999))
 opt_weights = Adam([weights],          lr=LR_WEIGHTS, betas=(0.99, 0.999), maximize=True)
-scheduler   = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(opt_model, T_0=2000, T_mult=2, eta_min=LR_MIN)
+scheduler   = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(opt_model, T_0=T_0, T_mult=T_mult, eta_min=LR_MIN)
 
 # ═══════════════════════════════════════════════════════════════
 # TRAINING LOOP
