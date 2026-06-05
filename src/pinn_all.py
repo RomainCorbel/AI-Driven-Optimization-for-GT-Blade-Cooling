@@ -350,21 +350,21 @@ def get_loss(
 folder           = "dp11"
 Project_name     = "PINNs-ALL_scitas"
 device           = "cuda"
-debug            = True
+debug            = False
 
 data_folder      = "./preProcessedData/with_T/" + folder + "/"
 Full_Project_name = Project_name + "_" + folder
 
-epochs_adam    = 1
-hidden_dim     = 128
+epochs_adam    = 100
+hidden_dim     = 50
 num_layer      = 4
 seed           = 42
 lr_adam        = 1e-3
-lr_weights     = 1e-3
+lr_weights     = 1e-4
 lr_final       = 1e-7
 lr_decay_rate  = (lr_final / lr_adam) ** (1.0 / epochs_adam)
 
-testing_factor = 50
+testing_factor = 100
 
 Num_points_used_for_testing    = 100 * testing_factor
 Num_points_used_for_training_per_epoch = 500 * testing_factor # per epoch because all the points that are not in the test set are in the training set, and we sample a new subset of them every epoch
@@ -569,15 +569,6 @@ def run_validation():
         vx_inlet_data, vy_inlet_data, vz_inlet_data, T_inlet, T_wall, alpha
     )
 
-    val_loss_total = (
-        val_loss_divergence
-        + val_loss_momentum_x + val_loss_momentum_y + val_loss_momentum_z
-        + val_loss_heat
-        + val_loss_inlet_vx + val_loss_inlet_vy + val_loss_inlet_vz + val_loss_inlet_T
-        + val_loss_outlet_p
-        + val_loss_wall_vx + val_loss_wall_vy + val_loss_wall_vz + val_loss_wall_T
-    )
-
     with torch.no_grad():
         test_fields = pinn_model(test_data_points)
     val_mse_vx = torch.mean((test_fields[:, 0] - test_vx_data) ** 2)
@@ -593,6 +584,8 @@ def run_validation():
         "Validation Y Momentum Loss":  safe_log10(val_loss_momentum_y),
         "Validation Z Momentum Loss":  safe_log10(val_loss_momentum_z),
         "Validation Heat Loss":        safe_log10(val_loss_heat),
+        "total_validation_PDE_loss":   safe_log10(val_loss_divergence + val_loss_momentum_x + val_loss_momentum_y + val_loss_momentum_z + val_loss_heat),
+        
         "Validation Inlet vx Loss":    safe_log10(val_loss_inlet_vx),
         "Validation Inlet vy Loss":    safe_log10(val_loss_inlet_vy),
         "Validation Inlet vz Loss":    safe_log10(val_loss_inlet_vz),
@@ -602,13 +595,17 @@ def run_validation():
         "Validation Wall vy Loss":     safe_log10(val_loss_wall_vy),
         "Validation Wall vz Loss":     safe_log10(val_loss_wall_vz),
         "Validation Wall T Loss":      safe_log10(val_loss_wall_T),
-        "Validation Total Loss":       safe_log10(val_loss_total),
+        "total_validation_boundary_loss":  safe_log10(val_loss_inlet_vx + val_loss_inlet_vy + val_loss_inlet_vz + val_loss_inlet_T + val_loss_outlet_p + val_loss_wall_vx + val_loss_wall_vy + val_loss_wall_vz + val_loss_wall_T),
+        
         "Val MSE vx":                  safe_log10(val_mse_vx),
         "Val MSE vy":                  safe_log10(val_mse_vy),
         "Val MSE vz":                  safe_log10(val_mse_vz),
         "Val MSE p":                   safe_log10(val_mse_p),
         "Val MSE T":                   safe_log10(val_mse_T),
         "Val MSE Total":               safe_log10(val_mse_total),
+        "Validation supervised Total Loss":       safe_log10(val_loss_total),
+
+        "validation total loss": safe_log10(va
     }
     val_log = {k: v for k, v in val_log.items() if v is not None}
 
@@ -728,6 +725,10 @@ for epoch in range(epochs_adam):
         "loss_momentum_y":    np.log10(loss_momentum_y.item()),
         "loss_momentum_z":    np.log10(loss_momentum_z.item()),
         "loss_heat":          np.log10(loss_heat.item()),
+        "total_physical_loss":       np.log10((
+            loss_divergence
+            + loss_momentum_x + loss_momentum_y + loss_momentum_z
+            + loss_heat).item()),
         "loss_inlet_vx":      np.log10(loss_inlet_vx.item()),
         "loss_inlet_vy":      np.log10(loss_inlet_vy.item()),
         "loss_inlet_vz":      np.log10(loss_inlet_vz.item()),
@@ -737,11 +738,16 @@ for epoch in range(epochs_adam):
         "loss_wall_vy":       np.log10(loss_wall_vy.item()),
         "loss_wall_vz":       np.log10(loss_wall_vz.item()),
         "loss_wall_T":        np.log10(loss_wall_T.item()),
+        "total_boundary_loss": np.log10((
+            loss_inlet_vx + loss_inlet_vy + loss_inlet_vz + loss_inlet_T
+            + loss_outlet_p
+            + loss_wall_vx + loss_wall_vy + loss_wall_vz + loss_wall_T).item()),
         "loss_supervised_vx": safe_log10(sup_vx),
         "loss_supervised_vy": safe_log10(sup_vy),
         "loss_supervised_vz": safe_log10(sup_vz),
         "loss_supervised_p":  safe_log10(sup_p),
         "loss_supervised_T":  safe_log10(sup_T),
+        "total_supervised_loss": safe_log10((sup_vx + sup_vy + sup_vz + sup_p + sup_T).item()),
         "loss_total":         np.log10(loss_total.item()),
         "LR": adam_lr_scheduler.get_last_lr()[0],
         **weights_log_dict(),
