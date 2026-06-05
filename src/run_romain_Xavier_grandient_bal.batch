@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --time=12:00:00
 #SBATCH --gres=gpu:1
-#SBATCH --output=/home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/logs.txt
+#SBATCH --output=/home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/logsXavier_gradient_balancing.txt
 ## Remove --qos=build for real runs (build queue is limited to ~15 min)
 ## #SBATCH --qos=build
 
