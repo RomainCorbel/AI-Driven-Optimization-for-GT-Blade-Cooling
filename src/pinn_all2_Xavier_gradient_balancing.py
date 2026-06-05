@@ -468,9 +468,10 @@ for epoch in range(EPOCHS):
     # ── Model update (weights treated as fixed constants) ────────
     l_total = (weights.detach() * all_losses).sum()
     l_total.backward(retain_graph=True)
-    opt_model.step()
 
     # ── GradNorm weight update ────────────────────────────────────
+    # NOTE: must run before opt_model.step() — step() modifies last_layer.weight
+    # in-place, invalidating the retained computation graph.
     if loss0 is None:
         loss0 = all_losses.detach().clone()
 
@@ -496,6 +497,8 @@ for epoch in range(EPOCHS):
     opt_weights.zero_grad()
     l_gradnorm.backward()
     opt_weights.step()
+
+    opt_model.step()
 
     with torch.no_grad():
         weights.data = weights.data / weights.data.sum() * N_LOSSES
