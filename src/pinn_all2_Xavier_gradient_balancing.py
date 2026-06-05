@@ -268,7 +268,7 @@ DEBUG        = False
 
 DATA_DIR = f"./preProcessedData/with_T/{FOLDER}/"
 
-EPOCHS     = 10_000
+EPOCHS     = 5000
 HIDDEN_DIM = 20
 N_LAYERS   = 4
 SEED       = 42
@@ -302,6 +302,8 @@ N_LOSSES = len(LOSS_NAMES)
 # ═══════════════════════════════════════════════════════════════
 
 if not DEBUG:
+    api_key = "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"
+    wandb.login(key=api_key)
     run = wandb.init(
         project=PROJECT_NAME,
         config={
