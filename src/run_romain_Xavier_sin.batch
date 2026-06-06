@@ -3,9 +3,9 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1
-#SBATCH --time=3:00:00
+#SBATCH --time=10:00:00
 #SBATCH --gres=gpu:1
-#SBATCH --output=/home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/logs_new_Xavier_sin.txt
+#SBATCH --output=/home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/logs_new_Xavier_sin50000.txt
 ## Remove --qos=build for real runs (build queue is limited to ~15 min)
 ## #SBATCH --qos=build
 
@@ -18,4 +18,4 @@ module load cuda/11.8.0
 source /home/corbel/miniconda3/etc/profile.d/conda.sh
 conda activate blade-cooling
 cd /home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/src
-srun python pinn_all2_Xavier_gradient_balancing.py
+srun python pinn_all3.py

@@ -279,8 +279,8 @@ DEVICE       = "cuda"
 DEBUG        = False
 
 DATA_DIR = f"./preProcessedData/with_T/{FOLDER}/"
-RUN_PATH = f"../RUN_PATH_Xavier_new_sin"
-EPOCHS     = 50_000
+RUN_PATH = f"../RUN_MoreWalls"
+EPOCHS     = 10_000
 HIDDEN_DIM = 20
 N_LAYERS   = 4
 SEED       = 42
@@ -294,12 +294,12 @@ N_mult = 2
 N_TEST  = 10_000
 N_TRAIN = 5000
 N_SUP   = 500     # supervised CFD points per epoch (anchor vx on CFD data)
-N_POINT_SNAPSHOTS = 50_000  # for plotting predicted fields at fixed points every N epochs
+N_POINT_SNAPSHOTS = 100_000  # for plotting predicted fields at fixed points every N epochs
 
-n_vol_train    = int(0.82 * N_TRAIN)
-n_outlet_train = int(0.06 * N_TRAIN)
-n_wall_train   = int(0.06 * N_TRAIN)
-n_inlet_train  = int(0.06 * N_TRAIN)  # from CSV, not STL
+n_vol_train    = int(0.6 * N_TRAIN)
+n_outlet_train = int(0.05 * N_TRAIN)
+n_wall_train   = int(0.3 * N_TRAIN)
+n_inlet_train  = int(0.05 * N_TRAIN)  # from CSV, not STL
 
 LOSS_NAMES = [
     "divergence",
