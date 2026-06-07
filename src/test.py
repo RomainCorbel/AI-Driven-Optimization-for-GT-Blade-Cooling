@@ -269,8 +269,8 @@ def plot_fields(pts, fields, output_dir, tag=""):
         return x.detach().cpu().numpy() if isinstance(x, torch.Tensor) else np.asarray(x)
 
     pts_np = to_np(pts)
-    idx    = np.random.choice(len(pts_np), min(15_000, len(pts_np)), replace=False)
-    p_sub  = pts_np[idx]
+    idx    = np.arange(len(pts_np))
+    p_sub  = pts_np
 
     for name, data_raw, pred_raw in fields:
         data, pred = to_np(data_raw), to_np(pred_raw)
@@ -334,7 +334,7 @@ N_TEST  = 10_000
 N_TRAIN = 5_000
 N_SUP   = 1000      # supervised CFD points drawn each epoch
 
-N_POINT_SNAPSHOTS = 600000
+N_POINT_SNAPSHOTS = 50000
 
 n_vol_train    = int(0.60 * N_TRAIN)
 n_outlet_train = int(0.05 * N_TRAIN)
