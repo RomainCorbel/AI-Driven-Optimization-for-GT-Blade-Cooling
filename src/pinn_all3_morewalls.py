@@ -228,7 +228,7 @@ def init_weights(m):
 # PLOTTING
 # ═══════════════════════════════════════════════════════════════
 
-def plot_fields(pts, fields, output_dir="../RUN_PATH_Xavier", tag=""):
+def plot_fields(pts, fields, output_dir="../RUN_MoreWalls", tag=""):
     os.makedirs(output_dir, exist_ok=True)
 
     def to_np(x):
@@ -294,7 +294,7 @@ N_mult = 2
 N_TEST  = 10_000
 N_TRAIN = 5000
 N_SUP   = 500     # supervised CFD points per epoch (anchor vx on CFD data)
-N_POINT_SNAPSHOTS = 100_000  # for plotting predicted fields at fixed points every N epochs
+N_POINT_SNAPSHOTS = 50_000  # for plotting predicted fields at fixed points every N epochs
 
 n_vol_train    = int(0.6 * N_TRAIN)
 n_outlet_train = int(0.05 * N_TRAIN)
@@ -500,7 +500,7 @@ for epoch in range(EPOCHS):
 
     # ── Training snapshot plots ──────────────────────────────
     if epoch in plot_epochs:
-        snap_dir = f"../RUN_PATH_Xavier/{epoch + 1}_{EPOCHS}"
+        snap_dir = f"../RUN_MoreWalls/{epoch + 1}_{EPOCHS}"
         with torch.no_grad():
             pred_snap = model(snap_pts)
         plot_fields(
@@ -569,8 +569,8 @@ for epoch in range(EPOCHS):
         wandb.log(log, step=epoch)
 
 print(f"\nTraining done in {time.time() - start:.1f}s")
-torch.save(model.state_dict(),        "../RUN_PATH_Xavier/pinn_model_v5.pt")
-torch.save(weights.detach().cpu(),    "../RUN_PATH_Xavier/loss_weights_v5.pt")
+torch.save(model.state_dict(),        "../RUN_MoreWalls/pinn_model_v5.pt")
+torch.save(weights.detach().cpu(),    "../RUN_MoreWalls/loss_weights_v5.pt")
 
 # ═══════════════════════════════════════════════════════════════
 # INFERENCE  (CPU, full domain)
@@ -579,7 +579,7 @@ torch.save(weights.detach().cpu(),    "../RUN_PATH_Xavier/loss_weights_v5.pt")
 torch.set_default_device("cpu")
 net_inf   = FFNN(in_dim=3, hidden_dim=HIDDEN_DIM, out_dim=5, n_layers=N_LAYERS)
 model_inf = NormalizedPINN(net_inf, coord_mean.cpu(), coord_std.cpu(), out_mean.cpu(), out_std.cpu())
-model_inf.load_state_dict(torch.load("../RUN_PATH_Xavier/pinn_model_v5.pt", weights_only=True, map_location="cpu"))
+model_inf.load_state_dict(torch.load("../RUN_MoreWalls/pinn_model_v5.pt", weights_only=True, map_location="cpu"))
 model_inf.eval()
 
 vx_in_full = np.load(DATA_DIR + "vel_x_inlet.npy")

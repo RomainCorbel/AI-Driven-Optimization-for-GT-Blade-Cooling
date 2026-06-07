@@ -313,7 +313,7 @@ DEVICE       = "cuda"
 DEBUG        = False
 
 DATA_DIR = f"./preProcessedData/with_T/{FOLDER}/"
-RUN_PATH = f"../RUN_MoreWalls"
+RUN_PATH = f"../RUN_MoreWalls_claude"
 
 EPOCHS     = 10_000
 HIDDEN_DIM = 20
@@ -474,7 +474,7 @@ def safe_log10(x):
     return float(np.log10(v)) if v > 0 else float("nan")
 
 
-plot_epochs = set(np.linspace(0, EPOCHS - 1, 5, dtype=int).tolist())
+plot_epochs = set(np.linspace(0, EPOCHS - 1, 10, dtype=int).tolist())
 
 # ═══════════════════════════════════════════════════════════════
 # TRAINING LOOP
