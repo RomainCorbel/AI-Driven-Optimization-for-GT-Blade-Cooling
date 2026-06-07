@@ -315,7 +315,7 @@ DEVICE       = "cuda"
 DEBUG        = False
 
 DATA_DIR = f"./preProcessedData/with_T/{FOLDER}/"
-RUN_PATH = f"../RUN_MoreWalls_claude_no_sup"
+RUN_PATH = f"../RunV10"
 
 EPOCHS     = 10_000
 HIDDEN_DIM = 20
