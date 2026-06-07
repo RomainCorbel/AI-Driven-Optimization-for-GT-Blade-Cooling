@@ -369,7 +369,6 @@ if not DEBUG:
             "n_train": N_TRAIN, "n_test": N_TEST, "n_supervised": N_SUP,
             "n_vol_train": n_vol_train, "n_outlet_train": n_outlet_train,
             "n_wall_train": n_wall_train, "n_inlet_train": n_inlet_train,
-            "pde_warmup_epochs": PDE_WARMUP_EPOCHS,
             "mom_scale": MOM_SCALE, "div_scale": DIV_SCALE,
         },
     )
@@ -600,7 +599,6 @@ for epoch in range(EPOCHS):
         "loss/sup_total":        safe_log10(l_sup_total),
         "loss/unweighted_total": safe_log10(l_unweighted),
         "loss/weighted_total":   safe_log10(l_weighted),
-        "loss/pde_weight":       pde_weight,
         "eval/mse_vx":    safe_log10(mse_vx),
         "eval/mse_vy":    safe_log10(mse_vy),
         "eval/mse_vz":    safe_log10(mse_vz),
@@ -613,7 +611,7 @@ for epoch in range(EPOCHS):
     log = {k: v for k, v in log.items() if not (isinstance(v, float) and np.isnan(v))}
 
     print(
-        f"[{epoch+1:>5}/{EPOCHS}] pde_w={pde_weight:.2f}  "
+        f"[{epoch+1:>5}/{EPOCHS}]"
         f"PDE: {l_pde_total.item():.3e}  BC: {l_bc_total.item():.3e}  "
         f"SUP: {l_sup_total.item():.3e}  "
         f"MSE vx/vy/vz/p/T: "
