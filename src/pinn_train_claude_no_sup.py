@@ -313,7 +313,7 @@ DEVICE       = "cuda"
 DEBUG        = False
 
 DATA_DIR = f"./preProcessedData/with_T/{FOLDER}/"
-RUN_PATH = f"../RUN_MoreWalls_claude_no_warmup"
+RUN_PATH = f"../RUN_MoreWalls_claude_no_sup"
 
 EPOCHS     = 10_000
 HIDDEN_DIM = 20
@@ -332,9 +332,9 @@ N_MULT     = 2
 PDE_WARMUP_EPOCHS = 1
 N_TEST  = 10_000
 N_TRAIN = 5_000
-N_SUP   = 500      # supervised CFD points drawn each epoch
+N_SUP   = 0      # supervised CFD points drawn each epoch
 
-N_POINT_SNAPSHOTS = 100_000
+N_POINT_SNAPSHOTS = 200_000
 
 n_vol_train    = int(0.60 * N_TRAIN)
 n_outlet_train = int(0.05 * N_TRAIN)

@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --time=10:00:00
 #SBATCH --gres=gpu:1
-#SBATCH --output=/home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/run_romain_more_walls_claude_no_warmup.txt
+#SBATCH --output=/home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/run_romain_more_walls_claude_high_sup.txt
 ## Remove --qos=build for real runs (build queue is limited to ~15 min)
 ## #SBATCH --qos=build
 
@@ -18,4 +18,4 @@ module load cuda/11.8.0
 source /home/corbel/miniconda3/etc/profile.d/conda.sh
 conda activate blade-cooling
 cd /home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/src
-srun python pinn_train_claude.py
+srun python pinn_train_claude_high_sup.py
