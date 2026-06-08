@@ -3,7 +3,7 @@
 .vscode/
 __pycache__/
 wandb/
-src/preProcessed_data/
+src/preProcessedData/
 old_runs/
 logs/
 not_used_yet/
