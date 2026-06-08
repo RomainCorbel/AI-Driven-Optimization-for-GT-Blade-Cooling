@@ -310,12 +310,12 @@ def plot_fields(pts, fields, output_dir, tag=""):
 # ═══════════════════════════════════════════════════════════════
 
 FOLDER       = "dp11"
-PROJECT_NAME = "PINNs-ALL_scitas_dp11"
+PROJECT_NAME = "PINN10"
 DEVICE       = "cuda"
 DEBUG        = False
 
 DATA_DIR = f"./preProcessedData/with_T/{FOLDER}/"
-RUN_PATH = f"../RunV10"
+RUN_PATH = f"../pinn10_unsupervised/pinn10_unsupervised"
 
 EPOCHS     = 10_000
 HIDDEN_DIM = 20
@@ -329,7 +329,7 @@ N_MULT     = 2
 
 N_TEST  = 10_000
 N_TRAIN = 5_000
-N_SUP   = 0      # supervised CFD points drawn each epoch
+N_SUP   = 0     
 
 N_POINT_SNAPSHOTS = 20_000
 
@@ -350,7 +350,6 @@ LOSS_NAMES = [
     "sup_vx", "sup_vy", "sup_vz", "sup_p", "sup_T",
 ]
 N_LOSSES   = len(LOSS_NAMES)
-N_PDE      = 5   # first N_PDE entries are PDE terms
 
 # ═══════════════════════════════════════════════════════════════
 # INIT
