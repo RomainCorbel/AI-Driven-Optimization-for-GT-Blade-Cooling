@@ -70,25 +70,29 @@ def sample_outlet(mesh, n):
 def sample_wall(mesh, n):
     thresh = 1e-5
     x_max  = mesh.vertices[:, 0].max()
-    pts, _ = trimesh.sample.sample_surface(mesh, n)
-    mask   = (np.abs(pts[:, 0]) > thresh) & \
+    pts, face_ids = trimesh.sample.sample_surface(mesh, n)
+    mask    = (np.abs(pts[:, 0]) > thresh) & \
               ~((x_max - thresh <= pts[:, 0]) & (pts[:, 0] <= x_max + thresh))
-    pts    = torch.tensor(pts[mask])
-    return pts, 3 * torch.ones(len(pts), dtype=torch.int64)
+    normals = torch.tensor(mesh.face_normals[face_ids[mask]])
+    pts     = torch.tensor(pts[mask])
+    return pts, 3 * torch.ones(len(pts), dtype=torch.int64), normals
 
 def sample_volume(mesh, n):
     pts = torch.tensor(trimesh.sample.volume_mesh(mesh, n))
     return pts, torch.zeros(len(pts), dtype=torch.int64)
 
 def sample_collocation(mesh, n_vol, n_outlet, n_wall):
-    parts_pts, parts_lbl = [], []
-    for fn, nn_ in [(sample_outlet, n_outlet), (sample_wall, n_wall), (sample_volume, n_vol)]:
+    parts_pts, parts_lbl, parts_normals = [], [], []
+    for fn, nn_ in [(sample_outlet, n_outlet), (sample_volume, n_vol)]:
         p, l = fn(mesh, nn_)
         parts_pts.append(p)
         parts_lbl.append(l)
-    pts, lbl = torch.cat(parts_pts), torch.cat(parts_lbl)
+        parts_normals.append(torch.zeros(len(p), 3, dtype=torch.float64))
+    w_pts, w_lbl, w_normals = sample_wall(mesh, n_wall)
+    parts_pts.append(w_pts);     parts_lbl.append(w_lbl);     parts_normals.append(w_normals)
+    pts, lbl, normals = torch.cat(parts_pts), torch.cat(parts_lbl), torch.cat(parts_normals)
     perm = torch.randperm(pts.size(0))
-    return pts[perm], lbl[perm]
+    return pts[perm], lbl[perm], normals[perm]
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -149,7 +153,7 @@ def compute_losses(
     vz_x, vz_y, vz_z, vz_xx, vz_yy, vz_zz,
     p_x, p_y, p_z,
     T_x, T_y, T_z, T_xx, T_yy, T_zz,
-    labels, p_out, vx_in, vy_in, vz_in, T_in, T_w,
+    labels, wall_normals, p_out, vx_in, vy_in, vz_in, T_in, T_w,
     vx_var, vy_var, vz_var, p_var, T_var,
 ):
     interior = labels == 0
@@ -197,10 +201,18 @@ def compute_losses(
     l_wall_vz  = torch.mean(vz[wall] ** 2)                        / vz_var
     l_wall_T   = torch.mean((T[wall]               - T_w) ** 2)  / T_var
 
+    # Neumann BC: ∂p/∂n = 0 on no-slip walls (from momentum eq. with v=0)
+    n_x = wall_normals[wall, 0:1]
+    n_y = wall_normals[wall, 1:2]
+    n_z = wall_normals[wall, 2:3]
+    dp_dn = p_x[wall] * n_x + p_y[wall] * n_y + p_z[wall] * n_z
+    l_wall_dp_dn = torch.mean(dp_dn ** 2) / p_var
+
     return (
         l_div, l_mom_x, l_mom_y, l_mom_z, l_heat,
         l_inlet_vx, l_inlet_vy, l_inlet_vz, l_inlet_T, l_outlet_p,
         l_wall_vx, l_wall_vy, l_wall_vz, l_wall_T,
+        l_wall_dp_dn,
     )
 
 
@@ -336,14 +348,15 @@ n_wall_train   = int(0.30 * N_TRAIN)
 n_inlet_train  = int(0.05 * N_TRAIN)
 
 # indices 0-4  → PDE losses   (divergence, mom_x, mom_y, mom_z, heat)
-# indices 5-13 → BC losses
-# indices 14-18 → supervised losses
+# indices 5-14 → BC losses
+# indices 15-19 → supervised losses
 LOSS_NAMES = [
     "divergence",
     "momentum_x", "momentum_y", "momentum_z",
     "heat",
     "bc_inlet_vx", "bc_inlet_vy", "bc_inlet_vz", "bc_inlet_T", "bc_outlet_p",
     "bc_wall_vx",  "bc_wall_vy",  "bc_wall_vz",  "bc_wall_T",
+    "bc_wall_dp_dn",
     "sup_vx", "sup_vy", "sup_vz", "sup_p", "sup_T",
 ]
 N_LOSSES   = len(LOSS_NAMES)
@@ -488,7 +501,7 @@ print("=" * 60)
 
 for epoch in range(EPOCHS):
     # ── Collocation points ───────────────────────────────────
-    coll_pts, coll_lbls = sample_collocation(
+    coll_pts, coll_lbls, coll_normals = sample_collocation(
         mesh, n_vol_train, n_outlet_train, n_wall_train
     )
     coll_pts = coll_pts / 1000   # STL in mm → m
@@ -497,6 +510,8 @@ for epoch in range(EPOCHS):
     pts  = torch.cat([coll_pts, inlet_pts]).requires_grad_(True)
     lbls = torch.cat([coll_lbls,
                        torch.ones(inlet_pts.shape[0], dtype=torch.long)])
+    wall_normals = torch.cat([coll_normals,
+                               torch.zeros(inlet_pts.shape[0], 3, dtype=torch.float64)])
 
     # ── Forward + PDE/BC losses ──────────────────────────────
     model.train()
@@ -509,8 +524,9 @@ for epoch in range(EPOCHS):
         l_div, l_mom_x, l_mom_y, l_mom_z, l_heat,
         l_inlet_vx, l_inlet_vy, l_inlet_vz, l_inlet_T, l_outlet_p,
         l_wall_vx,  l_wall_vy,  l_wall_vz,  l_wall_T,
+        l_wall_dp_dn,
     ) = compute_losses(
-        *derivs, lbls,
+        *derivs, lbls, wall_normals,
         P_OUTLET, vx_inlet_bc, vy_inlet_bc, vz_inlet_bc, T_INLET, T_WALL,
         vx_var, vy_var, vz_var, p_var, T_var,
     )
@@ -531,7 +547,7 @@ for epoch in range(EPOCHS):
     # ── Aggregate & weighted loss ─────────────────────────────
     l_pde_total = l_div + l_mom_x + l_mom_y + l_mom_z + l_heat
     l_bc_total  = (l_inlet_vx + l_inlet_vy + l_inlet_vz + l_inlet_T + l_outlet_p
-                   + l_wall_vx + l_wall_vy + l_wall_vz + l_wall_T)
+                   + l_wall_vx + l_wall_vy + l_wall_vz + l_wall_T + l_wall_dp_dn)
     l_sup_total = l_sup_vx + l_sup_vy + l_sup_vz + l_sup_p + l_sup_T
 
     all_losses = torch.stack([
@@ -539,7 +555,8 @@ for epoch in range(EPOCHS):
         l_inlet_vx, l_inlet_vy, l_inlet_vz, l_inlet_T,     # 5-8  inlet BC
         l_outlet_p,                                          # 9    outlet BC
         l_wall_vx, l_wall_vy, l_wall_vz, l_wall_T,         # 10-13 wall BC
-        l_sup_vx, l_sup_vy, l_sup_vz, l_sup_p, l_sup_T,   # 14-18 supervised
+        l_wall_dp_dn,                                        # 14   wall pressure Neumann BC
+        l_sup_vx, l_sup_vy, l_sup_vz, l_sup_p, l_sup_T,   # 15-19 supervised
     ])
     l_unweighted = all_losses.sum()
     l_weighted   = torch.sum(weights * all_losses) - weights.sum()
@@ -595,6 +612,7 @@ for epoch in range(EPOCHS):
         "bc/wall_vy":     safe_log10(l_wall_vy),
         "bc/wall_vz":     safe_log10(l_wall_vz),
         "bc/wall_T":      safe_log10(l_wall_T),
+        "bc/wall_dp_dn":  safe_log10(l_wall_dp_dn),
         "sup/vx":         safe_log10(l_sup_vx),
         "sup/vy":         safe_log10(l_sup_vy),
         "sup/vz":         safe_log10(l_sup_vz),
@@ -622,9 +640,9 @@ for epoch in range(EPOCHS):
         f"PDE   div={l_div.item():.3e}  mom_x={l_mom_x.item():.3e}  mom_y={l_mom_y.item():.3e}  mom_z={l_mom_z.item():.3e}  heat={l_heat.item():.3e}  | total={l_pde_total.item():.3e}\n"
         f"      w: div={w['divergence']:.3e}  mom_x={w['momentum_x']:.3e}  mom_y={w['momentum_y']:.3e}  mom_z={w['momentum_z']:.3e}  heat={w['heat']:.3e}\n"
         f"BC    inlet_vx={l_inlet_vx.item():.3e}  inlet_vy={l_inlet_vy.item():.3e}  inlet_vz={l_inlet_vz.item():.3e}  inlet_T={l_inlet_T.item():.3e}  outlet_p={l_outlet_p.item():.3e}\n"
-        f"      wall_vx={l_wall_vx.item():.3e}   wall_vy={l_wall_vy.item():.3e}   wall_vz={l_wall_vz.item():.3e}   wall_T={l_wall_T.item():.3e}  | total={l_bc_total.item():.3e}\n"
+        f"      wall_vx={l_wall_vx.item():.3e}   wall_vy={l_wall_vy.item():.3e}   wall_vz={l_wall_vz.item():.3e}   wall_T={l_wall_T.item():.3e}   wall_dp_dn={l_wall_dp_dn.item():.3e}  | total={l_bc_total.item():.3e}\n"
         f"      w: inlet_vx={w['bc_inlet_vx']:.3e}  inlet_vy={w['bc_inlet_vy']:.3e}  inlet_vz={w['bc_inlet_vz']:.3e}  inlet_T={w['bc_inlet_T']:.3e}  outlet_p={w['bc_outlet_p']:.3e}\n"
-        f"      w: wall_vx={w['bc_wall_vx']:.3e}   wall_vy={w['bc_wall_vy']:.3e}   wall_vz={w['bc_wall_vz']:.3e}   wall_T={w['bc_wall_T']:.3e}\n"
+        f"      w: wall_vx={w['bc_wall_vx']:.3e}   wall_vy={w['bc_wall_vy']:.3e}   wall_vz={w['bc_wall_vz']:.3e}   wall_T={w['bc_wall_T']:.3e}   wall_dp_dn={w['bc_wall_dp_dn']:.3e}\n"
         f"SUP   vx={l_sup_vx.item():.3e}  vy={l_sup_vy.item():.3e}  vz={l_sup_vz.item():.3e}  p={l_sup_p.item():.3e}  T={l_sup_T.item():.3e}  | total={l_sup_total.item():.3e}\n"
         f"      w: vx={w['sup_vx']:.3e}  vy={w['sup_vy']:.3e}  vz={w['sup_vz']:.3e}  p={w['sup_p']:.3e}  T={w['sup_T']:.3e}\n"
         f"MSE   vx={mse_vx.item():.3e}  vy={mse_vy.item():.3e}  vz={mse_vz.item():.3e}  p={mse_p.item():.3e}  T={mse_T.item():.3e}  | total={mse_total.item():.3e}"
