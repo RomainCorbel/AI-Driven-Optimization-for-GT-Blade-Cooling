@@ -201,7 +201,7 @@ def compute_losses(
     l_wall_vz  = torch.mean(vz[wall] ** 2)                        / vz_var
     l_wall_T   = torch.mean((T[wall]               - T_w) ** 2)  / T_var
 
-    # Neumann BC: ∂p/∂n = 0 on no-slip walls (from momentum eq. with v=0)
+    # Neumann BC: ∂p/∂n = 0 on no-slip walls (from momentum eq. with v=0) (but we saw that it didn't improve anything, technically we could delete it)
     # Normalize by p_var/L² so units are (bar/m)²/(bar/m)² = dimensionless.
     # coord_std.mean() is the data-derived characteristic length [m].
     n_x = wall_normals[wall, 0:1]
