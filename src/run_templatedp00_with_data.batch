@@ -1,0 +1,49 @@
+#!/bin/bash -l
+
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=1
+#SBATCH --time=10:00:00
+#SBATCH --gres=gpu:1
+#SBATCH --output=/home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/logs/slurm_%j.log
+## Remove --qos=build for real runs (build queue is limited to ~15 min)
+## #SBATCH --qos=build
+
+module load gcc/11.3.0
+module load intel/2021.6.0
+module load nvhpc/23.3-mpi
+module load cuda/11.8.0
+
+source /home/corbel/miniconda3/etc/profile.d/conda.sh
+conda activate blade-cooling
+cd /home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/src
+srun python run_pinn13.py \
+    --n-sup    500 \
+    --run-path /home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/pinn13_runs/pinn13_dp00_with_data
+    # All available arguments (defaults shown):
+    #
+    # --- I/O ---
+    --folder      dp00          # Data subfolder under preProcessedData/with_T/
+    # --run-path    <auto>        Output directory (auto-derived from params if omitted)
+    # --project     PINN10        W&B project name
+    # --device      cuda          Torch device (e.g. cpu, cuda, cuda:1)
+    # --debug       False         Set True to skip W&B logging
+    #
+    # --- Architecture ---
+    # --hidden-dim  20            Hidden layer width
+    # --n-layers    4             Number of hidden layers
+    #
+    # --- Training ---
+    # --epochs      10000         Total training epochs
+    # --seed        42            Random seed
+    # --lr          1e-3          Learning rate for network weights
+    # --lr-weights  1e-4          Learning rate for loss weights (self-adaptive)
+    # --lr-min      1e-6          Minimum LR for cosine annealing scheduler
+    # --t0          2000          CosineAnnealingWarmRestarts T_0 (period of first restart)
+    # --n-mult      2             CosineAnnealingWarmRestarts T_mult (period multiplier)
+    #
+    # --- Sampling ---
+    # --n-train     5000          Collocation points sampled per epoch
+    # --n-test      10000         Test/validation points
+    # --n-sup       500           Supervised CFD points per epoch (0 = physics-only / no-data)
+    # --n-snapshots 20000         Points used for snapshot plots
