@@ -202,11 +202,14 @@ def compute_losses(
     l_wall_T   = torch.mean((T[wall]               - T_w) ** 2)  / T_var
 
     # Neumann BC: ∂p/∂n = 0 on no-slip walls (from momentum eq. with v=0)
+    # Normalize by p_var/L² so units are (bar/m)²/(bar/m)² = dimensionless.
+    # coord_std.mean() is the data-derived characteristic length [m].
     n_x = wall_normals[wall, 0:1]
     n_y = wall_normals[wall, 1:2]
     n_z = wall_normals[wall, 2:3]
     dp_dn = p_x[wall] * n_x + p_y[wall] * n_y + p_z[wall] * n_z
-    l_wall_dp_dn = torch.mean(dp_dn ** 2) / p_var
+    grad_p_var = p_var / coord_std.mean() ** 2
+    l_wall_dp_dn = torch.mean(dp_dn ** 2) / grad_p_var
 
     return (
         l_div, l_mom_x, l_mom_y, l_mom_z, l_heat,
@@ -321,10 +324,10 @@ def plot_fields(pts, fields, output_dir, tag=""):
 FOLDER       = "dp11"
 PROJECT_NAME = "PINN10"
 DEVICE       = "cuda"
-DEBUG        = True
+DEBUG        = False
 
 DATA_DIR = f"./preProcessedData/with_T/{FOLDER}/"
-RUN_PATH = f"../pinn11_old_sampling_no_data/pinn11_old_sampling_no_data"
+RUN_PATH = f"../pinn12_with_data/pinn12_with_data"
 
 EPOCHS     = 10_000
 HIDDEN_DIM = 20
@@ -338,7 +341,7 @@ N_MULT     = 2
 
 N_TEST  = 10_000
 N_TRAIN = 5_000
-N_SUP   = 0      # supervised CFD points drawn each epoch
+N_SUP   = 500      # supervised CFD points drawn each epoch
 
 N_POINT_SNAPSHOTS = 20_000
 
