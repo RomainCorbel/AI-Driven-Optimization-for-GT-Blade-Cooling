@@ -1,0 +1,64 @@
+#!/bin/bash -l
+
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=1
+#SBATCH --time=10:00:00
+#SBATCH --gres=gpu:1
+#SBATCH --output=/home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/pinn13_runs/slurm_%j.log
+## Remove --qos=build for real runs (build queue is limited to ~15 min)
+## #SBATCH --qos=build
+
+# ══════════════════════════════════════════════════════════════
+# PARAMETERS — only edit this block between runs
+# ══════════════════════════════════════════════════════════════
+FOLDER="dp11"
+HIDDEN_DIM=20
+N_LAYERS=4
+EPOCHS=10000
+LR="1e-3"
+LR_WEIGHTS="1e-4"
+LR_MIN="1e-6"
+T0=2000
+N_MULT=2
+N_TRAIN=5000
+N_TEST=10000
+N_SUP=500        # > 0 = semi-supervised with CFD data
+SEED=42
+PROJECT="PINN13"
+# ══════════════════════════════════════════════════════════════
+
+# Derive run path from parameters — mirrors run_pinn13.py auto-naming exactly
+RUN_NAME="f${FOLDER}_h${HIDDEN_DIM}_l${N_LAYERS}_e${EPOCHS}_lr${LR}_lrw${LR_WEIGHTS}_t0${T0}_nm${N_MULT}_ntrain${N_TRAIN}_sup${N_SUP}_s${SEED}"
+RUN_PATH="/home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/pinn13_runs/${RUN_NAME}"
+mkdir -p "${RUN_PATH}"
+
+echo "SLURM job ${SLURM_JOB_ID}"
+echo "Run path : ${RUN_PATH}"
+echo "Training log: ${RUN_PATH}/training.log"
+
+module load gcc/11.3.0
+module load intel/2021.6.0
+module load nvhpc/23.3-mpi
+module load cuda/11.8.0
+
+source /home/corbel/miniconda3/etc/profile.d/conda.sh
+conda activate blade-cooling
+cd /home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/src
+
+srun python run_pinn13.py \
+    --folder        "${FOLDER}"     \
+    --hidden-dim    "${HIDDEN_DIM}" \
+    --n-layers      "${N_LAYERS}"   \
+    --epochs        "${EPOCHS}"     \
+    --lr            "${LR}"         \
+    --lr-weights    "${LR_WEIGHTS}" \
+    --lr-min        "${LR_MIN}"     \
+    --t0            "${T0}"         \
+    --n-mult        "${N_MULT}"     \
+    --n-train       "${N_TRAIN}"    \
+    --n-test        "${N_TEST}"     \
+    --n-sup         "${N_SUP}"      \
+    --seed          "${SEED}"       \
+    --project       "${PROJECT}"    \
+    --run-path      "${RUN_PATH}"
