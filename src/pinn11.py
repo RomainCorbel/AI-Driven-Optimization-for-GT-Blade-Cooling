@@ -176,7 +176,6 @@ def compute_losses(
     p_x, p_y, p_z,
     T_x, T_y, T_z, T_xx, T_yy, T_zz,
     labels, p_out, vx_in, vy_in, vz_in, T_in, T_w,
-    # variance scales (precomputed, passed in for normalization)
     vx_var, vy_var, vz_var, p_var, T_var,
 ):
     interior = labels == 0
@@ -336,7 +335,7 @@ def plot_fields(pts, fields, output_dir, tag=""):
 FOLDER       = "dp11"
 PROJECT_NAME = "PINN10"
 DEVICE       = "cuda"
-DEBUG        = False
+DEBUG        = True
 
 DATA_DIR = f"./preProcessedData/with_T/{FOLDER}/"
 RUN_PATH = f"../pinn11/pinn11"
@@ -449,14 +448,24 @@ test_vz  = cfd_vz[test_idx];   train_vz  = cfd_vz[train_idx]
 test_p   = cfd_p[test_idx] / 1e5;   train_p = cfd_p[train_idx] / 1e5
 test_T   = cfd_T[test_idx];    train_T  = cfd_T[train_idx]
 
-# Variance of each field on the training split — used to normalize losses
-vx_var = train_vx.var().clamp(min=1e-6)
-vy_var = train_vy.var().clamp(min=1e-6)
-vz_var = train_vz.var().clamp(min=1e-6)
-p_var  = train_p.var().clamp(min=1e-6) # .clamp(min=(P_OUTLET * 0.01)**2)  # floor: 1% de P_OUTLET This is to solve the isoterme pb, just trying to only clamp T as p is not cst. ---------------------------------
-T_var  = train_T.var().clamp(min=1.0)    # floor: 1 K² → 1 K erreur = O(1) loss
+# One variance per field = max(domain var, inlet BC var)
+# Physical floors prevent explosion when a field is nearly uniform.
+def _var(raw_var, floor, name):
+    v = raw_var.clamp(min=floor)
+    if raw_var.item() < floor:
+        print(f"  [variance floor hit] {name}: raw={raw_var.item():.2e} → using floor={floor:.2e}")
+    return v
 
-print(f"\nField variances (used for loss normalization):")
+vx_raw = torch.maximum(train_vx.var(), vx_inlet_bc.var())
+vy_raw = torch.maximum(train_vy.var(), vy_inlet_bc.var())
+vz_raw = torch.maximum(train_vz.var(), vz_inlet_bc.var())
+vx_var = _var(vx_raw, 1e-6,                  "vx")
+vy_var = _var(vy_raw, 1e-6,                  "vy")
+vz_var = _var(vz_raw, 1e-6,                  "vz")
+p_var  = _var(train_p.var(), (P_OUTLET*0.01)**2, "p")
+T_var  = _var(train_T.var(), 1.0,            "T")
+
+print(f"\nField variances (used for all loss normalization):")
 print(f"  vx: {vx_var.item():.4e}  vy: {vy_var.item():.4e}  vz: {vz_var.item():.4e}")
 print(f"  p:  {p_var.item():.4e}   T:  {T_var.item():.4e}")
 
