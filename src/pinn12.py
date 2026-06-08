@@ -321,7 +321,7 @@ def plot_fields(pts, fields, output_dir, tag=""):
 FOLDER       = "dp11"
 PROJECT_NAME = "PINN10"
 DEVICE       = "cuda"
-DEBUG        = False
+DEBUG        = True
 
 DATA_DIR = f"./preProcessedData/with_T/{FOLDER}/"
 RUN_PATH = f"../pinn11_old_sampling_no_data/pinn11_old_sampling_no_data"
