@@ -4,3 +4,6 @@
 __pycache__/
 wandb/
 src/preProcessed_data/
+old_runs/
+logs/
+not_used_yet/
