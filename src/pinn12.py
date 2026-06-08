@@ -67,44 +67,18 @@ def sample_outlet(mesh, n):
     return pts, 2 * torch.ones(len(pts), dtype=torch.int64)
 
 
-# def sample_wall(mesh, n):
-#     thresh = 1e-5
-#     x_max  = mesh.vertices[:, 0].max()
-#     pts, _ = trimesh.sample.sample_surface(mesh, n)
-#     mask   = (np.abs(pts[:, 0]) > thresh) & \
-#               ~((x_max - thresh <= pts[:, 0]) & (pts[:, 0] <= x_max + thresh))
-#     pts    = torch.tensor(pts[mask])
-#     return pts, 3 * torch.ones(len(pts), dtype=torch.int64)
-
 def sample_wall(mesh, n):
     thresh = 1e-5
     x_max  = mesh.vertices[:, 0].max()
-    wall_face_ids = [
-        i for i, f in enumerate(mesh.faces)
-        if not (np.all(np.abs(mesh.vertices[f, 0]) < thresh) or
-                np.all(np.abs(mesh.vertices[f, 0] - x_max) < thresh))
-    ]
-    pts = _submesh_pts(mesh, wall_face_ids, n)
+    pts, _ = trimesh.sample.sample_surface(mesh, n)
+    mask   = (np.abs(pts[:, 0]) > thresh) & \
+              ~((x_max - thresh <= pts[:, 0]) & (pts[:, 0] <= x_max + thresh))
+    pts    = torch.tensor(pts[mask])
     return pts, 3 * torch.ones(len(pts), dtype=torch.int64)
 
-# def sample_volume(mesh, n):
-#     pts = torch.tensor(trimesh.sample.volume_mesh(mesh, n))
-#     return pts, torch.zeros(len(pts), dtype=torch.int64)
-
-def sample_volume(mesh, n, wall_clearance=4.0):  # 4 mm in STL units
-    oversample_factor = 2.5
-    while True:
-        pts_raw = trimesh.sample.volume_mesh(mesh, int(n * oversample_factor))
-        # proximity.closest_point returns (closest_pts, distances, face_ids)
-        _, distances, _ = trimesh.proximity.closest_point(mesh, pts_raw)
-        pts_filtered = pts_raw[distances > wall_clearance]
-        if len(pts_filtered) >= n:
-            break
-        oversample_factor *= 1.5
-        print(f"[sample_volume] retrying with factor {oversample_factor:.1f} "
-              f"({len(pts_filtered)}/{n} points survived)")
-    idx = np.random.choice(len(pts_filtered), n, replace=False)
-    return torch.tensor(pts_filtered[idx]), torch.zeros(n, dtype=torch.int64)
+def sample_volume(mesh, n):
+    pts = torch.tensor(trimesh.sample.volume_mesh(mesh, n))
+    return pts, torch.zeros(len(pts), dtype=torch.int64)
 
 def sample_collocation(mesh, n_vol, n_outlet, n_wall):
     parts_pts, parts_lbl = [], []
@@ -338,7 +312,7 @@ DEVICE       = "cuda"
 DEBUG        = False
 
 DATA_DIR = f"./preProcessedData/with_T/{FOLDER}/"
-RUN_PATH = f"../pinn11/pinn11"
+RUN_PATH = f"../pinn11_old_sampling_no_data/pinn11_old_sampling_no_data"
 
 EPOCHS     = 10_000
 HIDDEN_DIM = 20
@@ -352,7 +326,7 @@ N_MULT     = 2
 
 N_TEST  = 10_000
 N_TRAIN = 5_000
-N_SUP   = 500      # supervised CFD points drawn each epoch
+N_SUP   = 0      # supervised CFD points drawn each epoch
 
 N_POINT_SNAPSHOTS = 20_000
 
