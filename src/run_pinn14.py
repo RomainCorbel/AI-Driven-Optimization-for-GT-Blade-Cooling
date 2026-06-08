@@ -62,38 +62,37 @@ def sample_inlet(mesh, n):
     return pts, torch.ones(len(pts), dtype=torch.int64)
 
 
-def sample_outlet(mesh, n):
-    thresh = 1e-5
-    x_max  = mesh.vertices[:, 0].max()
-    faces  = [i for i, f in enumerate(mesh.faces)
-               if np.all(np.abs(mesh.vertices[f, 0] - x_max) < thresh)]
-    pts    = _submesh_pts(mesh, faces, n)
-    return pts, 2 * torch.ones(len(pts), dtype=torch.int64)
-
-
 def sample_wall(mesh, n):
-    thresh = 1e-5
-    x_max  = mesh.vertices[:, 0].max()
+    # X_MIN_MM / X_MAX_MM are set from CFD data after loading — see DATA section.
     pts, face_ids = trimesh.sample.sample_surface(mesh, n)
-    mask    = (np.abs(pts[:, 0]) > thresh) & \
-              ~((x_max - thresh <= pts[:, 0]) & (pts[:, 0] <= x_max + thresh))
+    x = pts[:, 0]
+    mask = (
+        (np.abs(x - X_MIN_MM) > 0.1) &   # not the inlet face
+        (np.abs(x - X_MAX_MM) > 0.1) &   # not the outlet face
+        (x >= X_MIN_MM) &                 # discard inlet buffer geometry
+        (x <= X_MAX_MM)                   # discard outlet buffer geometry
+    )
     normals = torch.tensor(mesh.face_normals[face_ids[mask]])
     pts     = torch.tensor(pts[mask])
     return pts, 3 * torch.ones(len(pts), dtype=torch.int64), normals
 
 
-def sample_volume(mesh, n):
-    pts = torch.tensor(trimesh.sample.volume_mesh(mesh, n))
-    return pts, torch.zeros(len(pts), dtype=torch.int64)
+def sample_volume(mesh, n, _oversample=3):
+    # Oversample then clip to the physical domain, discarding buffer regions.
+    # X_MIN_MM / X_MAX_MM are set from CFD data after loading — see DATA section.
+    raw = trimesh.sample.volume_mesh(mesh, int(n * _oversample))
+    mask = (raw[:, 0] >= X_MIN_MM) & (raw[:, 0] <= X_MAX_MM)
+    raw  = raw[mask]
+    if len(raw) > n:
+        raw = raw[np.random.choice(len(raw), n, replace=False)]
+    return torch.tensor(raw), torch.zeros(len(raw), dtype=torch.int64)
 
 
-def sample_collocation(mesh, n_vol, n_outlet, n_wall):
+def sample_collocation(mesh, n_vol, n_wall):
     parts_pts, parts_lbl, parts_normals = [], [], []
-    for fn, nn_ in [(sample_outlet, n_outlet), (sample_volume, n_vol)]:
-        p, l = fn(mesh, nn_)
-        parts_pts.append(p)
-        parts_lbl.append(l)
-        parts_normals.append(torch.zeros(len(p), 3, dtype=torch.float64))
+    p, l = sample_volume(mesh, n_vol)
+    parts_pts.append(p);   parts_lbl.append(l)
+    parts_normals.append(torch.zeros(len(p), 3, dtype=torch.float64))
     w_pts, w_lbl, w_normals = sample_wall(mesh, n_wall)
     parts_pts.append(w_pts);     parts_lbl.append(w_lbl);     parts_normals.append(w_normals)
     pts, lbl, normals = torch.cat(parts_pts), torch.cat(parts_lbl), torch.cat(parts_normals)
@@ -403,7 +402,7 @@ class _Tee(io.TextIOBase):
         self._stream.flush()
         self._logfile.flush()
 
-_log_handle = open(_log_path, "w", buffering=1)
+_log_handle = open(_log_path, "w", buffering=1, encoding="utf-8")
 sys.stdout  = _Tee(sys.__stdout__,  _log_handle)
 sys.stderr  = _Tee(sys.__stderr__,  _log_handle)
 
@@ -477,6 +476,26 @@ cfd_vz  = torch.tensor(np.load(DATA_DIR + "vel_z.npy")[:, 3])
 cfd_p   = torch.tensor(np.load(DATA_DIR + "press.npy")[:, 3])
 cfd_T   = torch.tensor(np.load(DATA_DIR + "temp.npy")[:, 3])
 
+# ── Domain bounds — derived from CFD, works for any dp ──────
+# CFD files are always exported to the physical domain only, so their
+# x-range is the ground truth. sample_wall / sample_volume use these
+# globals to clip away any buffer geometry in the STL.
+X_MIN_MM = float(cfd_pts[:, 0].min()) * 1000   # [mm]
+X_MAX_MM = float(cfd_pts[:, 0].max()) * 1000   # [mm]
+print(f"Physical domain  x : [{X_MIN_MM:.2f}, {X_MAX_MM:.2f}] mm"
+      f"  =  [{X_MIN_MM/1000:.4f}, {X_MAX_MM/1000:.4f}] m")
+
+# ── Outlet BC points — CFD slice near x = X_MAX_MM ──────────
+# STLs may not have an internal face at the physical outlet (e.g. dp00
+# mesh runs to 1975 mm with no face at 1135 mm). Using the CFD slice
+# mirrors how inlet_pts works and is robust for any dp.
+_out_mask  = cfd_pts[:, 0] > (X_MAX_MM / 1000 - 0.005)   # 5 mm slice
+_out_pool  = cfd_pts[_out_mask]
+_out_perm  = torch.randperm(len(_out_pool))[:n_outlet_train]
+outlet_pts = _out_pool[_out_perm]
+print(f"Outlet BC        : {len(_out_pool)} CFD points near x={X_MAX_MM/1000:.4f} m,"
+      f" using {len(outlet_pts)}")
+
 coord_mean = cfd_pts.mean(dim=0)
 coord_std  = cfd_pts.std(dim=0)
 out_mean   = torch.stack([cfd_vx.mean(), cfd_vy.mean(), cfd_vz.mean(),
@@ -523,6 +542,11 @@ print(f"  p:  {p_var.item():.4e}   T:  {T_var.item():.4e}")
 stl_files = glob.glob(DATA_DIR + "*.stl")
 print(f"Loading STL: {stl_files[0]}")
 mesh = trimesh.load(stl_files[0])
+_stl_xmin = float(mesh.vertices[:, 0].min())
+_stl_xmax = float(mesh.vertices[:, 0].max())
+print(f"STL mesh         x : [{_stl_xmin:.2f}, {_stl_xmax:.2f}] mm"
+      f"  (outlet buffer = {_stl_xmax - X_MAX_MM:.1f} mm,"
+      f"  inlet buffer = {X_MIN_MM - _stl_xmin:.1f} mm)")
 
 _snap_n   = min(N_POINT_SNAPSHOTS, cfd_pts.shape[0])
 _snap_idx = np.random.choice(cfd_pts.shape[0], _snap_n, replace=False)
@@ -566,15 +590,18 @@ print("=" * 60)
 
 for epoch in range(EPOCHS):
     coll_pts, coll_lbls, coll_normals = sample_collocation(
-        mesh, n_vol_train, n_outlet_train, n_wall_train
+        mesh, n_vol_train, n_wall_train
     )
     coll_pts = coll_pts / 1000   # STL in mm → m
 
-    pts  = torch.cat([coll_pts, inlet_pts]).requires_grad_(True)
+    # inlet_pts (label=1) and outlet_pts (label=2) come from CFD data (already in m)
+    pts  = torch.cat([coll_pts, inlet_pts, outlet_pts]).requires_grad_(True)
     lbls = torch.cat([coll_lbls,
-                       torch.ones(inlet_pts.shape[0], dtype=torch.long)])
+                       torch.ones(inlet_pts.shape[0],      dtype=torch.long),
+                       2 * torch.ones(outlet_pts.shape[0], dtype=torch.long)])
     wall_normals = torch.cat([coll_normals,
-                               torch.zeros(inlet_pts.shape[0], 3, dtype=torch.float64)])
+                               torch.zeros(inlet_pts.shape[0],  3, dtype=torch.float64),
+                               torch.zeros(outlet_pts.shape[0], 3, dtype=torch.float64)])
 
     model.train()
     opt_model.zero_grad()
