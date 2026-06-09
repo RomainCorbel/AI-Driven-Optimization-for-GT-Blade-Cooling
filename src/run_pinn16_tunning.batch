@@ -1,0 +1,54 @@
+#!/bin/bash -l
+
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=1
+#SBATCH --time=10:00:00
+#SBATCH --gres=gpu:1
+#SBATCH --mem=16G
+#SBATCH --output=/home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/logs/slurm_%A_%a.log
+#SBATCH --array=0-47
+
+HIDDEN_DIMS=(20 64 128)
+N_LAYERS=(4 6)
+N_SUP=(0 500 1000 2000)
+N_TRAIN=(2000 10000)
+
+# Grid: 3 x 2 x 4 x 2 = 48 jobs
+# task_id = h_idx*(N_L*N_S*N_T) + l_idx*(N_S*N_T) + s_idx*N_T + t_idx
+N_L=2
+N_S=4
+N_T=2
+
+H_IDX=$(( SLURM_ARRAY_TASK_ID / (N_L * N_S * N_T) ))
+L_IDX=$(( (SLURM_ARRAY_TASK_ID / (N_S * N_T)) % N_L ))
+S_IDX=$(( (SLURM_ARRAY_TASK_ID / N_T) % N_S ))
+T_IDX=$(( SLURM_ARRAY_TASK_ID % N_T ))
+
+H=${HIDDEN_DIMS[$H_IDX]}
+L=${N_LAYERS[$L_IDX]}
+S=${N_SUP[$S_IDX]}
+NT=${N_TRAIN[$T_IDX]}
+
+# Epochs aligned to scheduler cycle boundaries: T_0=2000, T_mult=2
+# Cycle 1 ends at epoch 2000, cycle 2 ends at epoch 6000
+EPOCHS=6000
+
+module load gcc/11.3.0
+module load intel/2021.6.0
+module load nvhpc/23.3-mpi
+module load cuda/11.8.0
+
+source /home/corbel/miniconda3/etc/profile.d/conda.sh
+conda activate blade-cooling
+cd /home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/src
+
+srun python run_pinn16.py \
+    --folder       dp00 \
+    --hidden-dim   $H \
+    --n-layers     $L \
+    --n-sup        $S \
+    --n-train      $NT \
+    --epochs       $EPOCHS \
+    --project      PINN16_tuning \
+    --run-path /home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/pinn16_tuning/h${H}_l${L}_sup${S}_ntrain${NT}

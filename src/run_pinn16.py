@@ -300,7 +300,8 @@ class NormalizedPINN(nn.Module):
 # PLOTTING
 # ═══════════════════════════════════════════════════════════════
 
-def plot_fields(pts, fields, output_dir, tag=""):
+def plot_fields(pts, fields, output_dir, tag="", slice_frac=0.10):
+    """One figure per field: top row = 3D scatter, bottom row = x-y cut at z=z_mid."""
     os.makedirs(output_dir, exist_ok=True)
 
     def to_np(x):
@@ -309,12 +310,18 @@ def plot_fields(pts, fields, output_dir, tag=""):
         return x.detach().cpu().numpy() if isinstance(x, torch.Tensor) else np.asarray(x)
 
     pts_np = to_np(pts)
-    idx    = np.arange(len(pts_np))
-    p_sub  = pts_np
 
-    # Physical aspect ratio so geometry isn't distorted (x >> z for this duct)
-    ranges = p_sub.max(axis=0) - p_sub.min(axis=0)
+    # Physical aspect ratio for 3D plots (x >> z for this duct)
+    ranges     = pts_np.max(axis=0) - pts_np.min(axis=0)
     box_aspect = (ranges / ranges.max()).tolist()
+
+    # Midplane mask: x-y slice at z = z_mid (10 % band of z range)
+    z_vals  = pts_np[:, 2]
+    z_mid   = 0.5 * (z_vals.min() + z_vals.max())
+    z_tol   = slice_frac * (z_vals.max() - z_vals.min())
+    cut_mask = np.abs(z_vals - z_mid) < z_tol
+    p_cut    = pts_np[cut_mask]
+    cut_label = f"x-y  at  z = {z_mid*1000:.1f} mm  (n={cut_mask.sum()})"
 
     for name, data_raw, pred_raw in fields:
         data, pred = to_np(data_raw), to_np(pred_raw)
@@ -330,18 +337,33 @@ def plot_fields(pts, fields, output_dir, tag=""):
             subplots.append((f"Diff – {name}", data - pred, None, None))
 
         n_sub = len(subplots)
-        fig, axes = plt.subplots(1, n_sub, figsize=(6 * n_sub, 5),
-                                  subplot_kw={"projection": "3d"})
-        if n_sub == 1:
-            axes = [axes]
-        for ax, (title, color, cmin, cmax) in zip(axes, subplots):
-            sc = ax.scatter(p_sub[:, 0], p_sub[:, 1], p_sub[:, 2],
-                            c=color[idx], cmap="viridis",
+        fig   = plt.figure(figsize=(6 * n_sub, 10))
+
+        # ── Row 1: 3D scatter ────────────────────────────────────
+        for i, (title, color, cmin, cmax) in enumerate(subplots):
+            ax = fig.add_subplot(2, n_sub, i + 1, projection="3d")
+            sc = ax.scatter(pts_np[:, 0], pts_np[:, 1], pts_np[:, 2],
+                            c=color, cmap="viridis",
                             vmin=cmin, vmax=cmax, s=1, rasterized=True)
             ax.set_box_aspect(box_aspect)
             ax.set_title(title, fontsize=10)
-            ax.set_xlabel("X"); ax.set_ylabel("Y"); ax.set_zlabel("Z")
+            ax.set_xlabel("X")
+            ax.set_yticklabels([]); ax.set_ylabel("")
+            ax.set_zticklabels([]); ax.set_zlabel("")
             plt.colorbar(sc, ax=ax, shrink=0.5, label=name)
+
+        # ── Row 2: 2D x-y cut at z_mid (own colour scale) ───────
+        for i, (title, color, cmin, cmax) in enumerate(subplots):
+            ax  = fig.add_subplot(2, n_sub, n_sub + i + 1)
+            col = color[cut_mask]
+            sc  = ax.scatter(p_cut[:, 0], p_cut[:, 1],
+                             c=col, cmap="viridis",
+                             vmin=cmin, vmax=cmax, s=4, rasterized=True)
+            ax.set_xlabel("x [m]"); ax.set_ylabel("y [m]")
+            ax.set_aspect("equal")
+            ax.set_title(f"{title}\n{cut_label}", fontsize=9)
+            plt.colorbar(sc, ax=ax, label=name, shrink=0.5, aspect=15)
+
         fig.tight_layout()
         fname = f"{name}{'_' + tag if tag else ''}.png"
         fig.savefig(os.path.join(output_dir, fname), dpi=120, bbox_inches="tight")
@@ -522,7 +544,7 @@ cfd_T   = torch.tensor(np.load(DATA_DIR + "temp.npy")[:, 3])
 # globals to clip away any buffer geometry in the STL.
 X_MIN_MM = float(cfd_pts[:, 0].min()) * 1000   # [mm] physical domain start (CFD frame)
 X_MAX_MM = float(cfd_pts[:, 0].max()) * 1000   # [mm] physical domain end   (CFD frame)
-STL_INLET_BUFFER_MM = 420.0   # [mm] inlet (and outlet) buffer present in the STL mesh
+STL_INLET_BUFFER_MM = 0.0 if FOLDER == "dp11" else 420.0  # dp11 STL has no buffer
 X_STL_MIN_MM = X_MIN_MM + STL_INLET_BUFFER_MM  # physical domain start in STL coords
 X_STL_MAX_MM = X_MAX_MM + STL_INLET_BUFFER_MM  # physical domain end   in STL coords
 print(f"Physical domain  x : [{X_MIN_MM:.2f}, {X_MAX_MM:.2f}] mm"
