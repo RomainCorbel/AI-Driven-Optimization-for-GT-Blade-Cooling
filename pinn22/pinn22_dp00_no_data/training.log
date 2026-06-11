@@ -66144,3 +66144,18 @@ LOSS  total=8.726e-02  (w_pde=1.0  w_bc=1.0  w_sup=1.0  w_sup_p=1.0)  lr=1.000e-
 MSE   vx=2.415e+03  vy=3.798e+02  vz=2.359e+01  p=1.477e-02  T=2.525e+02  | total=3.071e+03
 
 Training done in 536.6s
+vx  train RMSE: 4.9245e+01  test RMSE: 4.9145e+01
+vy  train RMSE: 1.9292e+01  test RMSE: 1.9490e+01
+vz  train RMSE: 4.9674e+00  test RMSE: 4.8569e+00
+/home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/src/run_pinn22.py:390: UserWarning: Tight layout not applied. tight_layout cannot make Axes width small enough to accommodate all Axes decorations
+  fig.tight_layout()
+/home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/src/run_pinn22.py:390: UserWarning: Tight layout not applied. tight_layout cannot make Axes width small enough to accommodate all Axes decorations
+  fig.tight_layout()
+/home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/src/run_pinn22.py:390: UserWarning: Tight layout not applied. tight_layout cannot make Axes width small enough to accommodate all Axes decorations
+  fig.tight_layout()
+p  train RMSE: 1.2204e-01  test RMSE: 1.2155e-01
+T  train RMSE: 1.6083e+01  test RMSE: 1.5890e+01
+/home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/src/run_pinn22.py:390: UserWarning: Tight layout not applied. tight_layout cannot make Axes width small enough to accommodate all Axes decorations
+  fig.tight_layout()
+/home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/src/run_pinn22.py:390: UserWarning: Tight layout not applied. tight_layout cannot make Axes width small enough to accommodate all Axes decorations
+  fig.tight_layout()
