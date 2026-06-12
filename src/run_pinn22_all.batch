@@ -33,7 +33,8 @@ cd /home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/src
 srun python run_pinn22.py \
     --folder              $FOLDER \
     --project             PINN22 \
+    --n-train             5000 \
     --n-sup               $N_SUP \
     --outlet-y-min-frac   $OUTLET_FRAC \
     --inlet-y-max-frac    $INLET_FRAC \
-    --run-path /home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/pinn22/pinn22_${NAME}
+    --run-path /home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/pinn22_high_sup/pinn2_high_sup2_${NAME}

@@ -260,8 +260,12 @@ def compute_losses(
     n_y = wall_normals[wall, 1:2]
     n_z = wall_normals[wall, 2:3]
     dp_dn = p_x[wall] * n_x + p_y[wall] * n_y + p_z[wall] * n_z
-    grad_p_var = p_var / coord_std.mean() ** 2
-    l_wall_dp_dn = torch.mean(dp_dn ** 2) / grad_p_var
+    grad_p_var = (
+        (p_var / coord_std[0] ** 2) * n_x ** 2 +
+        (p_var / coord_std[1] ** 2) * n_y ** 2 +
+        (p_var / coord_std[2] ** 2) * n_z ** 2
+    )
+    l_wall_dp_dn = torch.mean(dp_dn ** 2 / grad_p_var)
 
     return (
         l_div, l_mom_x, l_mom_y, l_mom_z, l_heat, l_ppe,
@@ -404,10 +408,10 @@ parser.add_argument("--folder",     default="dp11",   help="Data subfolder under
 parser.add_argument("--run-path",   default=None,     help="Output dir (default: auto-derived from all params)")
 parser.add_argument("--project",    default="PINN10", help="W&B project name")
 parser.add_argument("--device",     default="cuda",   help="Torch device")
-parser.add_argument("--debug",      action="store_true", help="Skip W&B logging")
+parser.add_argument("--debug",      action="store_false", help="Skip W&B logging")
 
 # Architecture
-parser.add_argument("--hidden-dim", type=int,   default=128)
+parser.add_argument("--hidden-dim", type=int,   default=20)
 parser.add_argument("--n-layers",   type=int,   default=4)
 
 # Training
@@ -421,7 +425,10 @@ parser.add_argument("--n-train",       type=int,   default=5_000)
 parser.add_argument("--n-test",        type=int,   default=10_000)
 parser.add_argument("--n-sup",         type=int,   default=500,   help="Supervised CFD points per epoch (0 = physics-only)")
 parser.add_argument("--n-snapshots",   type=int,   default=20_000, help="Points used for snapshot plots")
-parser.add_argument("--wall-fraction", type=float, default=0.5,   help="Fraction of volume pool sampled near walls")
+parser.add_argument("--wall-fraction",  type=float, default=0.5,    help="Fraction of volume pool sampled near walls")
+parser.add_argument("--n-pool",         type=int,   default=500_000, help="Total pool capacity split between vol and wall")
+parser.add_argument("--pool-frac-vol",  type=float, default=0.5,    help="Fraction of N_TOTAL_POOL for volume pool")
+parser.add_argument("--pool-frac-wall", type=float, default=0.5,    help="Fraction of N_TOTAL_POOL for wall pool")
 parser.add_argument("--delta-mm-horiz", type=float, default=1.0,   help="Max inward displacement from horizontal walls (|n_z|>=0.7) [mm]")
 parser.add_argument("--delta-mm-vert",  type=float, default=20.0,   help="Max inward displacement from vertical walls (|n_z|<0.7) [mm]")
 parser.add_argument("--w-pde",   type=float, default=1.0,   help="Weight for PDE residual losses")
@@ -453,7 +460,7 @@ LR_END     = args.lr_end
 GAMMA      = (LR_END / LR) ** (1.0 / args.epochs)
 
 N_TEST     = args.n_test
-N_TRAIN    = args.n_train
+N_TOTAL_TRAIN    = args.n_train
 N_SUP      = args.n_sup
 N_POINT_SNAPSHOTS = args.n_snapshots
 WALL_FRACTION    = args.wall_fraction
@@ -465,6 +472,9 @@ W_SUP   = args.w_sup
 W_SUP_P = args.w_sup_p
 OUTLET_Y_MIN_FRAC = args.outlet_y_min_frac
 INLET_Y_MAX_FRAC  = args.inlet_y_max_frac
+N_TOTAL_POOL   = args.n_pool
+POOL_FRAC_VOL  = args.pool_frac_vol
+POOL_FRAC_WALL = args.pool_frac_wall
 
 DATA_DIR = f"./preProcessedData/with_T/{FOLDER}/"
 
@@ -476,7 +486,7 @@ else:
              f"_h{HIDDEN_DIM}_l{N_LAYERS}"
              f"_e{EPOCHS}"
              f"_lr{LR:.0e}_lrend{LR_END:.0e}"
-             f"_ntrain{N_TRAIN}"
+             f"_ntrain{N_TOTAL_TRAIN}"
              f"_sup{N_SUP}"
              f"_wpde{W_PDE}_wbc{W_BC}_wsup{W_SUP}_wsupp{W_SUP_P}"
              f"_s{SEED}")
@@ -503,10 +513,14 @@ _log_handle = open(_log_path, "w", buffering=1, encoding="utf-8")
 sys.stdout  = _Tee(sys.__stdout__,  _log_handle)
 sys.stderr  = _Tee(sys.__stderr__,  _log_handle)
 
-n_vol_train    = int(0.20 * N_TRAIN)
-n_outlet_train = int(0.05 * N_TRAIN)
-n_wall_train   = int(0.70 * N_TRAIN)
-n_inlet_train  = int(0.05 * N_TRAIN)
+FRAC_VOL    = 0.20
+FRAC_WALL   = 0.70
+FRAC_INLET  = 0.05
+FRAC_OUTLET = 0.05
+n_vol_train    = int(FRAC_VOL    * N_TOTAL_TRAIN)
+n_outlet_train = int(FRAC_OUTLET * N_TOTAL_TRAIN)
+n_wall_train   = int(FRAC_WALL   * N_TOTAL_TRAIN)
+n_inlet_train  = int(FRAC_INLET  * N_TOTAL_TRAIN)
 
 # ═══════════════════════════════════════════════════════════════
 # INIT
@@ -516,7 +530,7 @@ print(f"Run path : {RUN_PATH}")
 print(f"Log file : {_log_path}")
 print(f"Config   : folder={FOLDER}  h={HIDDEN_DIM}  l={N_LAYERS}  epochs={EPOCHS}")
 print(f"           lr={LR}  lr_end={LR_END}  gamma={GAMMA:.6f}  (derived)")
-print(f"           n_train={N_TRAIN}  n_sup={N_SUP}  seed={SEED}")
+print(f"           n_train={N_TOTAL_TRAIN}  n_sup={N_SUP}  seed={SEED}")
 print(f"           w_pde={W_PDE}  w_bc={W_BC}  w_sup={W_SUP}  w_sup_p={W_SUP_P}")
 
 if not DEBUG:
@@ -530,7 +544,7 @@ if not DEBUG:
             "epochs": EPOCHS, "lr": LR, "lr_end": LR_END,
             "scheduler": "exponential", "gamma": GAMMA,
             "hidden_dim": HIDDEN_DIM, "n_layers": N_LAYERS, "seed": SEED,
-            "n_train": N_TRAIN, "n_test": N_TEST, "n_supervised": N_SUP,
+            "n_train": N_TOTAL_TRAIN, "n_test": N_TEST, "n_supervised": N_SUP,
             "w_pde": W_PDE, "w_bc": W_BC, "w_sup": W_SUP, "w_sup_p": W_SUP_P,
             "n_vol_train": n_vol_train, "n_outlet_train": n_outlet_train,
             "n_wall_train": n_wall_train, "n_inlet_train": n_inlet_train,
@@ -570,11 +584,13 @@ if INLET_Y_MAX_FRAC < 1.0:
 T_inlet_bc  = float(_temp_face[:, 3].mean())
 print(f"Inlet T from CFD  : mean={T_inlet_bc:.2f} K  (T_INLET_code={T_INLET:.2f} K)")
 
-inlet_perm  = np.random.permutation(_inlet_vx_raw.shape[0])[:n_inlet_train]
-inlet_pts   = torch.tensor(_inlet_vx_raw[inlet_perm, :3])
-vx_inlet_bc = torch.tensor(_inlet_vx_raw[inlet_perm, 3])
-vy_inlet_bc = torch.tensor(_inlet_vy_raw[inlet_perm, 3])
-vz_inlet_bc = torch.tensor(_inlet_vz_raw[inlet_perm, 3])
+inlet_pool = (
+    torch.tensor(_inlet_vx_raw[:, :3]),   # pts  (m)
+    torch.tensor(_inlet_vx_raw[:, 3]),    # vx
+    torch.tensor(_inlet_vy_raw[:, 3]),    # vy
+    torch.tensor(_inlet_vz_raw[:, 3]),    # vz
+)
+print(f"Inlet pool       : {len(inlet_pool[0])} CFD points, sampling {n_inlet_train} per epoch")
 
 cfd_pts = torch.tensor(np.load(DATA_DIR + "vel_x.npy")[:, :3])
 cfd_vx  = torch.tensor(np.load(DATA_DIR + "vel_x.npy")[:, 3])
@@ -605,11 +621,8 @@ if OUTLET_Y_MIN_FRAC > 0.0:
     _y_min_out = OUTLET_Y_MIN_FRAC * _y_max
     _out_mask  = _out_mask & (cfd_pts[:, 1] >= _y_min_out)
     print(f"Outlet BC y-filter: y >= {_y_min_out:.4f} m  (frac={OUTLET_Y_MIN_FRAC}, y_max={_y_max:.4f})")
-_out_pool  = cfd_pts[_out_mask]
-_out_perm  = torch.randperm(len(_out_pool))[:n_outlet_train]
-outlet_pts = _out_pool[_out_perm]
-print(f"Outlet BC        : {len(_out_pool)} CFD points near x={X_MAX_MM/1000:.4f} m,"
-      f" using {len(outlet_pts)}")
+outlet_pool = cfd_pts[_out_mask]
+print(f"Outlet pool      : {len(outlet_pool)} CFD points near x={X_MAX_MM/1000:.4f} m, sampling {n_outlet_train} per epoch")
 
 coord_mean = cfd_pts.mean(dim=0)
 coord_std  = cfd_pts.std(dim=0)
@@ -628,10 +641,8 @@ MOM_SCALE_Z = U_SCALE ** 2 / float(coord_std[2])
 DIV_SCALE   = float(max(out_std[0] / coord_std[0],
                         out_std[1] / coord_std[1],
                         out_std[2] / coord_std[2]))
-PPE_SCALE = 1e3 # 2
 print(f"MOM_SCALE  : X={MOM_SCALE_X:.1f}  Y={MOM_SCALE_Y:.1f}  Z={MOM_SCALE_Z:.1f}")
 print(f"DIV_SCALE  : {DIV_SCALE:.1f}")
-print(f"PPE_SCALE  : {PPE_SCALE:.4f}")
 
 print(f"coord_mean : {coord_mean.tolist()}")
 print(f"coord_std  : {coord_std.tolist()}")
@@ -666,18 +677,20 @@ def _var(raw_var, floor, name):
         print(f"  [variance floor hit] {name}: raw={raw_var.item():.2e} → using floor={floor:.2e}")
     return v
 
-vx_raw = torch.maximum(train_vx.var(), vx_inlet_bc.var())
-vy_raw = torch.maximum(train_vy.var(), vy_inlet_bc.var())
-vz_raw = torch.maximum(train_vz.var(), vz_inlet_bc.var())
+vx_raw = torch.maximum(train_vx.var(), inlet_pool[1].var())
+vy_raw = torch.maximum(train_vy.var(), inlet_pool[2].var())
+vz_raw = torch.maximum(train_vz.var(), inlet_pool[3].var())
 vx_var = _var(vx_raw, 1e-6,                  "vx")
 vy_var = _var(vy_raw, 1e-6,                  "vy")
 vz_var = _var(vz_raw, 1e-6,                  "vz")
 p_var  = _var(train_p.var(), (P_OUTLET*0.01)**2, "p")
 T_var  = _var(train_T.var(), 1.0,            "T")
 
+PPE_SCALE = float(p_var.item() ** 0.5) / float(coord_std.min() ** 2)
 print(f"\nField variances (used for all loss normalization):")
 print(f"  vx: {vx_var.item():.4e}  vy: {vy_var.item():.4e}  vz: {vz_var.item():.4e}")
 print(f"  p:  {p_var.item():.4e}   T:  {T_var.item():.4e}")
+print(f"  PPE_SCALE: {PPE_SCALE:.4e}  (data-driven: sqrt(p_var)/coord_std_mean^2)")
 
 stl_files = glob.glob(DATA_DIR + "*.stl")
 print(f"Loading STL: {stl_files[0]}")
@@ -690,16 +703,13 @@ print(f"STL mesh         x : [{_stl_xmin:.2f}, {_stl_xmax:.2f}] mm"
       f"  physical in STL: [{X_STL_MIN_MM:.1f}, {X_STL_MAX_MM:.1f}] mm)")
 
 print("Building volume pool (one-time trimesh call)...")
-vol_pool, _n_uniform, _n_near_horiz = build_volume_pool(mesh, n_pool=500_000,
-                                                        wall_fraction=WALL_FRACTION, # for the boundary layer)
+vol_pool, _n_uniform, _n_near_horiz = build_volume_pool(mesh, n_pool=int(POOL_FRAC_VOL * N_TOTAL_POOL),
+                                                        wall_fraction=WALL_FRACTION,
                                                         delta_horiz_mm=DELTA_HORIZ_MM,
                                                         delta_vert_mm=DELTA_VERT_MM)
-print(f"Volume pool      : {len(vol_pool)} points in physical domain"
-      f"  (drawing {n_vol_train} per epoch)")
-
 print("Building wall pool (one-time trimesh call)...")
-wall_pool = build_wall_pool(mesh, n_pool=500_000)
-print(f"Wall pool        : {len(wall_pool[0])} points  (drawing {n_wall_train} per epoch)")
+wall_pool = build_wall_pool(mesh, n_pool=int(POOL_FRAC_WALL * N_TOTAL_POOL))
+
 
 # ── Volume pool visualization ─────────────────────────────────
 _pool_np     = vol_pool.cpu().numpy()
@@ -750,8 +760,8 @@ _bg_i = np.random.choice(len(_pool_cfd_m), min(_bg_n, len(_pool_cfd_m)), replace
 _bg   = _pool_cfd_m[_bg_i]
 
 # ── Geometry BC visualization ─────────────────────────────────
-_in_np  = inlet_pts.cpu().numpy()
-_out_np = outlet_pts.cpu().numpy()
+_in_np  = inlet_pool[0].cpu().numpy()
+_out_np = outlet_pool.cpu().numpy()
 
 fig_geo = plt.figure(figsize=(18, 5))
 fig_geo.suptitle(
@@ -851,8 +861,37 @@ plot_epochs = set(np.linspace(0, EPOCHS - 1, 10, dtype=int).tolist())
 # TRAINING LOOP
 # ═══════════════════════════════════════════════════════════════
 
+_n_near_vert_cnt = len(_near_vert)
+_sup_str = f"+{N_SUP:,} supervised" if N_SUP > 0 else "physics-only (N_SUP=0)"
+_sep  = "═" * 65
+_thin = "─" * 63
+print(f"""
+{_sep}
+  POINT SETUP SUMMARY
+{_sep}
+
+  POOLS  (built once — N_TOTAL_POOL={N_TOTAL_POOL:,}, vol {POOL_FRAC_VOL:.0%} / wall {POOL_FRAC_WALL:.0%} — mm, STL frame)
+  {_thin}
+  Volume pool            {len(vol_pool):>10,} pts  total
+    ├─ uniform                      {_n_uniform:>10,} pts  ({100*_n_uniform//len(vol_pool):2d}%)
+    ├─ near-horiz  δ ≤ {DELTA_HORIZ_MM:5.1f} mm  |nz|≥0.7  {_n_near_horiz:>10,} pts  ({100*_n_near_horiz//len(vol_pool):2d}%)
+    └─ near-vert   δ ≤ {DELTA_VERT_MM:5.1f} mm  |nz|<0.7  {_n_near_vert_cnt:>10,} pts  ({100*_n_near_vert_cnt//len(vol_pool):2d}%)
+  Wall pool              {len(wall_pool[0]):>10,} pts  (surface + normals, STL frame)
+  Inlet pool             {len(inlet_pool[0]):>10,} pts  (CFD data, m)
+  Outlet pool            {len(outlet_pool):>10,} pts  (CFD data, m)
+{_sep}
+
+  N_TOTAL_TRAIN = {N_TOTAL_TRAIN:,} pts per forward pass, split as:
+    FRAC_VOL={FRAC_VOL:.0%}  FRAC_WALL={FRAC_WALL:.0%}  FRAC_INLET={FRAC_INLET:.0%}  FRAC_OUTLET={FRAC_OUTLET:.0%}
+  {_thin}
+  Volume interior  (label=0)  PDE residuals    {n_vol_train:>8,} pts  ({int(FRAC_VOL   *100):2d}%)
+  Wall BC          (label=3)  no-slip + ∂T/∂n  {n_wall_train:>8,} pts  ({int(FRAC_WALL  *100):2d}%)
+  Inlet BC         (label=1)  vx,vy,vz,T       {n_inlet_train:>8,} pts  ({int(FRAC_INLET *100):2d}%)
+  Outlet BC        (label=2)  pressure          {n_outlet_train:>8,} pts  ({int(FRAC_OUTLET*100):2d}%)
+  Supervised CFD             data loss          {N_SUP:>8,} pts  ({_sup_str})
+
+""")
 start = time.time()
-print("=" * 60)
 
 for epoch in range(EPOCHS):
     coll_pts, coll_lbls, coll_normals = sample_collocation(
@@ -862,7 +901,14 @@ for epoch in range(EPOCHS):
     coll_pts[:, 0] = coll_pts[:, 0] - STL_INLET_BUFFER_MM  # shift x to CFD frame (remove buffer)
     coll_pts = coll_pts / 1000   # mm → m
 
-    # inlet_pts (label=1) and outlet_pts (label=2) come from CFD data (already in m)
+    _in_idx  = torch.randperm(len(inlet_pool[0]))[:n_inlet_train]
+    inlet_pts   = inlet_pool[0][_in_idx]
+    vx_inlet_bc = inlet_pool[1][_in_idx]
+    vy_inlet_bc = inlet_pool[2][_in_idx]
+    vz_inlet_bc = inlet_pool[3][_in_idx]
+    _out_idx = torch.randperm(len(outlet_pool))[:n_outlet_train]
+    outlet_pts  = outlet_pool[_out_idx]
+
     pts  = torch.cat([coll_pts, inlet_pts, outlet_pts]).requires_grad_(True)
     lbls = torch.cat([coll_lbls,
                        torch.ones(inlet_pts.shape[0],      dtype=torch.long),
