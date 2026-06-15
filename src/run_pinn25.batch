@@ -1,0 +1,26 @@
+#!/bin/bash -l
+
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=1
+#SBATCH --time=24:00:00
+#SBATCH --gres=gpu:1
+#SBATCH --mem=64G
+#SBATCH --output=/home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/logs/slurm_%j.log
+
+module load gcc/11.3.0
+module load intel/2021.6.0
+module load nvhpc/23.3-mpi
+module load cuda/11.8.0
+
+source /home/corbel/miniconda3/etc/profile.d/conda.sh
+conda activate blade-cooling
+cd /home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/src
+
+srun python run_pinn25.py \
+    --project   PINN25 \
+    --n-train   5000 \
+    --n-sup     500 \
+    --epochs    6000 \
+    --debug \
+    --run-path  /home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/pinn25_runs/pinn25_main
