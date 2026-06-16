@@ -41,8 +41,8 @@ PARAM_MEANS = torch.tensor([ 9.0,   0.127,  10.0,   52.0,  108000.0], dtype=torc
 PARAM_STDS  = torch.tensor([ 3.5,   0.048,   3.1,   14.5,   58000.0], dtype=torch.float64)
 
 # Internal-wall sigmoid features — same y positions for ALL 50 DPs.
-WALL_Y1  = 0.1816   # [m]
-WALL_Y2  = 0.3632   # [m]
+WALL_Y1  = 0.185   # [m]
+WALL_Y2  = 0.375   # [m]
 WALL_EPS = 0.002    # [m] sigmoid width
 
 # ═══════════════════════════════════════════════════════════════
@@ -395,6 +395,43 @@ def plot_fields(pts, fields, output_dir, tag="", slice_frac=0.10):
         plt.close(fig)
 
 
+def plot_point_clouds(title, path, datasets, wall_ys=None, unit="m"):
+    fig = plt.figure(figsize=(18, 5))
+    fig.suptitle(title, fontsize=10)
+
+    ax3d = fig.add_subplot(141, projection="3d")
+    for pts, color, s, alpha, label in datasets:
+        ax3d.scatter(pts[:, 0], pts[:, 1], pts[:, 2], s=s, alpha=alpha, c=color, label=label)
+    ax3d.set_xlabel(f"x [{unit}]"); ax3d.set_ylabel(f"y [{unit}]"); ax3d.set_zlabel(f"z [{unit}]")
+    ax3d.set_title("3D view"); ax3d.legend(markerscale=8, fontsize=7)
+    if wall_ys:
+        _xr = [min(d[0][:, 0].min() for d in datasets), max(d[0][:, 0].max() for d in datasets)]
+        _zr = [min(d[0][:, 2].min() for d in datasets), max(d[0][:, 2].max() for d in datasets)]
+        for wy in wall_ys:
+            ax3d.plot(_xr, [wy, wy], [_zr[0], _zr[0]], c="orange", lw=1.0, ls="--")
+            ax3d.plot(_xr, [wy, wy], [_zr[1], _zr[1]], c="orange", lw=1.0, ls="--")
+
+    for i, (xl, yl, xi, yi) in enumerate(
+            [(f"x [{unit}]", f"y [{unit}]", 0, 1),
+             (f"x [{unit}]", f"z [{unit}]", 0, 2),
+             (f"y [{unit}]", f"z [{unit}]", 1, 2)], start=2):
+        ax = fig.add_subplot(1, 4, i)
+        for pts, color, s, alpha, _ in datasets:
+            ax.scatter(pts[:, xi], pts[:, yi], s=s, alpha=alpha, c=color)
+        ax.set_xlabel(xl); ax.set_ylabel(yl); ax.set_title(f"{xl} vs {yl}")
+        if wall_ys:
+            for wy in wall_ys:
+                if yi == 1:
+                    ax.axhline(wy, color="orange", lw=1.2, ls="--")
+                elif xi == 1:
+                    ax.axvline(wy, color="orange", lw=1.2, ls="--")
+
+    plt.tight_layout()
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"{os.path.basename(path)}  → {path}")
+
+
 # ═══════════════════════════════════════════════════════════════
 # ARGS
 # ═══════════════════════════════════════════════════════════════
@@ -568,7 +605,8 @@ def load_dp(cfg, args):
     P_REF  = float(cfd_p[out_mask].mean())
     P_DYN  = float(cfd_p[out_mask].std().clamp(min=1.0))   # dynamic scale from outlet spread
     # Use rho-based P_DYN for consistent NS non-dim:
-    rho       = P_REF * M / (R * t_wall)
+    # Reference state at inlet temperature (Re is defined at inlet conditions)
+    rho       = P_REF * M / (R * t_inlet)
     P_DYN     = rho * V_IN ** 2
     nu        = MU_REF / rho
     alpha_th  = K / (rho * CP)
@@ -600,10 +638,7 @@ def load_dp(cfg, args):
     print(f"    STL: {os.path.basename(stl_files[0])}")
     mesh = trimesh.load(stl_files[0])
 
-    stl_x_min_mm = float(mesh.vertices[:, 0].min())
-    stl_buffer_mm = stl_x_min_mm - x_min_mm
-    if stl_buffer_mm < -1.0:
-        raise RuntimeError(f"Negative STL buffer for {folder}: {stl_buffer_mm:.1f} mm")
+    stl_buffer_mm = 420.0
     x_stl_min_mm = x_min_mm + stl_buffer_mm
     x_stl_max_mm = x_max_mm + stl_buffer_mm
     print(f"    STL buffer={stl_buffer_mm:.1f} mm  "
@@ -664,7 +699,7 @@ def load_dp(cfg, args):
     # ── Pre-normalised parametric input ───────────────────────
     params_raw = torch.tensor([cfg["ar"], cfg["e_dh"], cfg["p_e"], cfg["alpha"], cfg["re"]],
                                dtype=torch.float64)
-    params_nd  = (params_raw - PARAM_MEANS) / PARAM_STDS
+    params_nd  = (params_raw - PARAM_MEANS.to(params_raw.device)) / PARAM_STDS.to(params_raw.device)
 
     print(f"    params_nd = {[f'{v:.3f}' for v in params_nd.tolist()]}")
     print(f"    vx_var={vx_var.item():.3e}  vy_var={vy_var.item():.3e}"
@@ -676,10 +711,16 @@ def load_dp(cfg, args):
         "params_nd": params_nd,
         # pools
         "vol_pool":    vol_pool,
+        "vol_pool_n_uni":   _n_uni,
+        "vol_pool_n_horiz": _n_horiz,
         "wall_pool":   wall_pool,
         "inlet_pool":  inlet_pool,
         "outlet_pool": outlet_pool,
-        "stl_buffer_mm": stl_buffer_mm,
+        "stl_buffer_mm":  stl_buffer_mm,
+        "x_min_mm":       x_min_mm,
+        "x_max_mm":       x_max_mm,
+        "x_stl_min_mm":   x_stl_min_mm,
+        "x_stl_max_mm":   x_stl_max_mm,
         # per-DP physics context (passed to compute_losses)
         "dp_ctx": {
             "delta_t":    delta_t,
@@ -733,6 +774,82 @@ N_DPS = len(dps)
 dp_names = [dp["folder"] for dp in dps]
 print(f"\nLoaded {N_DPS} DP(s): {dp_names}")
 
+if args.run_path:
+    RUN_PATH = args.run_path
+else:
+    RUN_PATH = (f"../pinn25_runs/"
+                f"n{N_DPS}_h{HIDDEN_DIM}_l{N_LAYERS}"
+                f"_e{EPOCHS}_lr{LR:.0e}_lrend{LR_END:.0e}"
+                f"_ntrain{N_TOTAL_TRAIN}_sup{N_SUP}_s{SEED}")
+os.makedirs(RUN_PATH, exist_ok=True)
+
+# ── Visualize pools/BCs for the first DP only ──────────────────
+_dp0         = dps[0]
+_buf         = _dp0["stl_buffer_mm"]
+_x_min_mm    = _dp0["x_min_mm"]
+_x_max_mm    = _dp0["x_max_mm"]
+_x_stl_min   = _dp0["x_stl_min_mm"]
+_x_stl_max   = _dp0["x_stl_max_mm"]
+print(f"[viz] {_dp0['folder']}  physical x=[{_x_min_mm:.1f}, {_x_max_mm:.1f}] mm"
+      f"  STL x=[{_x_stl_min:.1f}, {_x_stl_max:.1f}] mm  (buffer={_buf:.1f} mm)")
+_sub = 20_000
+
+_pool_np   = _dp0["vol_pool"].cpu().numpy()
+_n_uni     = _dp0["vol_pool_n_uni"]
+_n_horiz   = _dp0["vol_pool_n_horiz"]
+_uni       = _pool_np[:_n_uni]
+_near_horiz= _pool_np[_n_uni : _n_uni + _n_horiz]
+_near_vert = _pool_np[_n_uni + _n_horiz:]
+_ui  = np.random.choice(len(_uni),         min(_sub, len(_uni)),         replace=False)
+_hi  = np.random.choice(len(_near_horiz),  min(_sub, len(_near_horiz)),  replace=False)
+_vi  = np.random.choice(len(_near_vert),   min(_sub, len(_near_vert)),   replace=False)
+plot_point_clouds(
+    title=(f"[{_dp0['folder']}] Volume pool — "
+           f"uniform (blue, n={len(_uni)})  near-horiz (red, n={len(_near_horiz)})  "
+           f"near-vert (green, n={len(_near_vert)})"),
+    path=os.path.join(RUN_PATH, f"viz_volume_pool_{_dp0['folder']}.png"),
+    datasets=[
+        (_uni[_ui],         "steelblue", 0.5, 0.2, "uniform"),
+        (_near_horiz[_hi],  "crimson",   0.5, 0.3, "near-horiz"),
+        (_near_vert[_vi],   "limegreen", 0.5, 0.3, "near-vert"),
+    ],
+    unit="mm",
+)
+
+_pool_cfd_m = _pool_np.copy().astype(float)
+_pool_cfd_m[:, 0] -= _buf
+_pool_cfd_m /= 1000.0
+_bg_i = np.random.choice(len(_pool_cfd_m), min(_sub, len(_pool_cfd_m)), replace=False)
+_bg   = _pool_cfd_m[_bg_i]
+_in_np  = _dp0["inlet_pool"][0].cpu().numpy()
+_out_np = _dp0["outlet_pool"].cpu().numpy()
+plot_point_clouds(
+    title=(f"[{_dp0['folder']}] BC geometry — "
+           f"vol pool (grey)  inlet (green, n={len(_in_np)})  outlet (red, n={len(_out_np)})"
+           f"  |  walls y={WALL_Y1:.4f} / {WALL_Y2:.4f} m"),
+    path=os.path.join(RUN_PATH, f"viz_geometry_bc_{_dp0['folder']}.png"),
+    datasets=[
+        (_bg,     "grey",      0.5, 0.15, "vol pool"),
+        (_in_np,  "limegreen", 4,   1.0,  "inlet"),
+        (_out_np, "crimson",   4,   1.0,  "outlet"),
+    ],
+    wall_ys=[WALL_Y1, WALL_Y2],
+)
+
+_sup_np = _dp0["sup_pts"].cpu().numpy() if _dp0["n_sup"] > 0 else None
+_sv_datasets = [(_bg, "grey", 0.5, 0.15, "vol pool")]
+if _sup_np is not None:
+    _sv_datasets.append((_sup_np, "red", 1.5, 1.0, "supervised"))
+plot_point_clouds(
+    title=(f"[{_dp0['folder']}] Supervised pts (red, n={_dp0['n_sup']})  vol pool (grey)"
+           if _dp0["n_sup"] > 0 else f"[{_dp0['folder']}] Vol pool — no supervised pts"),
+    path=os.path.join(RUN_PATH, f"viz_supervised_points_{_dp0['folder']}.png"),
+    datasets=_sv_datasets,
+)
+del _dp0, _buf, _x_min_mm, _x_max_mm, _x_stl_min, _x_stl_max
+del _pool_np, _n_uni, _n_horiz, _uni, _near_horiz, _near_vert
+del _ui, _hi, _vi, _pool_cfd_m, _bg_i, _bg, _in_np, _out_np, _sv_datasets
+
 # ═══════════════════════════════════════════════════════════════
 # GLOBAL NORMALIZATION
 # ═══════════════════════════════════════════════════════════════
@@ -780,19 +897,11 @@ print(f"  MOM_SCALE  : X={MOM_SCALE_X:.1f}  Y={MOM_SCALE_Y:.1f}  Z={MOM_SCALE_Z:
 print(f"  DIV_SCALE  : {DIV_SCALE:.1f}")
 
 # ═══════════════════════════════════════════════════════════════
-# RUN PATH + LOGGING
+# ═══════════════════════════════════════════════════════════════
+# LOGGING
 # ═══════════════════════════════════════════════════════════════
 
-if args.run_path:
-    RUN_PATH = args.run_path
-else:
-    RUN_PATH = (f"../pinn25_runs/"
-                f"n{N_DPS}_h{HIDDEN_DIM}_l{N_LAYERS}"
-                f"_e{EPOCHS}_lr{LR:.0e}_lrend{LR_END:.0e}"
-                f"_ntrain{N_TOTAL_TRAIN}_sup{N_SUP}_s{SEED}")
-
-os.makedirs(RUN_PATH, exist_ok=True)
-_log_path   = os.path.join(RUN_PATH, "training.log")
+_log_path = os.path.join(RUN_PATH, "training.log")
 
 class _Tee(io.TextIOBase):
     def __init__(self, stream, logfile):
