@@ -19,7 +19,7 @@ cd /home/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/src
 
 srun python run_pinn25.py \
     --project   PINN25 \
-    --n-train   5000 \
+    --n-train   2500 \
     --n-sup     500 \
     --epochs    6000 \
     --debug \

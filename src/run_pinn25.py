@@ -632,7 +632,7 @@ def load_dp(cfg, args):
     outlet_pool = cfd_pts[out_mask]
 
     # ── STL mesh and pools ─────────────────────────────────────
-    stl_files = glob.glob(data_dir + "*.stl")
+    stl_files = glob.glob(data_dir + "*.stl") + glob.glob(data_dir + "*.STL")
     if not stl_files:
         raise FileNotFoundError(f"No STL found in {data_dir}")
     print(f"    STL: {os.path.basename(stl_files[0])}")
@@ -1074,7 +1074,7 @@ for epoch in range(EPOCHS):
 
     # ── Snap plots — all DPs at final epoch, min(1, N_DPS) otherwise ──
     if epoch in plot_epochs:
-        snap_dps = dps if (epoch == EPOCHS - 1) else dps[:min(1, N_DPS)]
+        snap_dps = dps
         for dp in snap_dps:
             snap_dir = os.path.join(RUN_PATH, f"snap_{epoch+1}_of_{EPOCHS}", dp["folder"])
             model.eval()
