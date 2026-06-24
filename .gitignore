@@ -7,3 +7,7 @@ src/preProcessedData/
 old_runs/
 logs/
 not_used_yet/
+src/pools/
+src/batch/
+pinn27_sweep_runs/
+qpp_mlp_sweep_runs/
