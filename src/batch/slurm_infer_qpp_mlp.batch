@@ -1,0 +1,20 @@
+#!/bin/bash
+#SBATCH --job-name=infer_qpp_mlp
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=32G
+#SBATCH --time=00:30:00
+#SBATCH --output=/scratch/izar/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/logs/slurm_infer_qpp_mlp_%j.log
+
+source /home/corbel/miniconda3/etc/profile.d/conda.sh
+conda activate blade-cooling
+
+cd /scratch/izar/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/src
+
+python infer_qpp_mlp.py \
+    --checkpoint ../qpp_mlp_sweep_runs/enim31rb/trial_4/qpp_mlp_final.pt \
+    --data-dir   ./preProcessedData/Inference \
+    --dps        dp102 dp103 dp104 dp105 \
+    --out-dir    ../qpp_mlp_sweep_runs/enim31rb/trial_4/inference \
+    --device     cuda

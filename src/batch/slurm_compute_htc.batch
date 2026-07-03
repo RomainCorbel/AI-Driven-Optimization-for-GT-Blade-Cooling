@@ -1,0 +1,25 @@
+#!/bin/bash -l
+
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=4
+#SBATCH --time=01:00:00
+#SBATCH --gres=gpu:1
+#SBATCH --mem=64G
+#SBATCH --output=/scratch/izar/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/logs/slurm_%j.log
+
+module load gcc/11.3.0
+module load intel/2021.6.0
+module load nvhpc/23.3-mpi
+module load cuda/11.8.0
+
+source /home/corbel/miniconda3/etc/profile.d/conda.sh
+conda activate blade-cooling
+cd /scratch/izar/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/src
+
+srun python compute_htc.py \
+    --pinn-path  ../best_PINN \
+    --mlp-ckpt   ../best_MLP/qpp_mlp_final.pt \
+    --data-dir   ./preProcessedData/Inference \
+    --dps        dp102 dp103 dp104 dp105 \
+    --out-dir    ../HTC_pred

@@ -1,0 +1,30 @@
+program: run_pinn27.py
+project: PINN27
+method: bayes
+
+metric:
+  goal: minimize
+  name: loss/total
+
+parameters:
+  hidden_dim:
+    values: [64, 128, 256]
+  n_layers:
+    values: [4, 6, 8]
+  n_train:
+    values: [5000, 10000, 20000]
+  epochs:
+    values: [500, 1000, 2000, 5000]
+  lr:
+    distribution: log_uniform_values
+    min: 1e-3
+    max: 1e-2
+  lr_decay_ratio:
+    distribution: log_uniform_values
+    min: 0.01
+    max: 0.5
+
+command:
+  - ${env}
+  - python
+  - ${program}

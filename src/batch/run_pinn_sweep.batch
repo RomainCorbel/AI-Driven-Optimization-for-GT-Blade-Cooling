@@ -1,0 +1,24 @@
+#!/bin/bash -l
+
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=1
+#SBATCH --time=24:00:00
+#SBATCH --gres=gpu:1
+#SBATCH --mem=128G
+#SBATCH --array=1-20
+#SBATCH --output=/scratch/izar/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/logs/slurm_sweep_%A_%a.log
+
+module load gcc/11.3.0
+module load intel/2021.6.0
+module load nvhpc/23.3-mpi
+module load cuda/11.8.0
+
+source /home/corbel/miniconda3/etc/profile.d/conda.sh
+conda activate blade-cooling
+cd /scratch/izar/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/src
+
+# Pass the full sweep path when submitting:
+#   sbatch --export=ALL,SWEEP_ID=romain-corbel-epfl/PINN27_Sweep2/bovcpaue run_pinn_sweep.batch
+# Each array job runs exactly one sweep trial
+srun wandb agent --count 1 ${SWEEP_ID}

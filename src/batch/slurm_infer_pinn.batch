@@ -1,0 +1,18 @@
+#!/bin/bash
+#SBATCH --job-name=infer_pinn
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=64G
+#SBATCH --time=01:00:00
+#SBATCH --output=/scratch/izar/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/logs/slurm_infer_pinn_%j.log
+
+source /home/corbel/miniconda3/etc/profile.d/conda.sh
+conda activate blade-cooling
+
+cd /scratch/izar/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/src
+
+python infer_pinn.py \
+    --run-path   ../best_PINN \
+    --dps        dp102 dp103 dp104 dp105 \
+    --data-root  ./preProcessedData/Inference
