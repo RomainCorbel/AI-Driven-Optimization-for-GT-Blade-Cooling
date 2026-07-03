@@ -1,0 +1,279 @@
+# AI-Driven Optimization for GT Blade Cooling
+
+## Introduction
+
+Gas turbine blades operate under extreme thermal conditions, requiring efficient cooling strategies to prevent failure. One approach is using turbulated internal cooling channels, which enhance heat transfer but also increase pressure losses. This project focuses on optimizing these geometries using AI-driven learning to maximize cooling while minimizing pressure drop. Traditional Computational Fluid Dynamics (CFD) simulations are used for design evaluation, but they require weeks of computation. This project proposes a Physics-Informed Neural Network (PINN)-based surrogate model to significantly accelerate optimization, reducing computation time from weeks to minutes while maintaining accuracy.
+
+---
+
+## Design Space
+
+The surrogate models are trained over a parametric space of **55 design points** (dp00–dp50 for training and dp102–dp105 for testing), each defined by 5 geometric and flow parameters:
+
+| Parameter | Symbol | Range |
+|-----------|--------|-------|
+| Aspect ratio | AR | 3.6 – 15.5 |
+| Rib height-to-hydraulic diameter | e/Dh | 0.046 – 0.205 |
+| Rib pitch-to-height | P/e | 4.8 – 15.2 |
+| Rib attack angle | α [°] | 25 – 78 |
+| Reynolds number | Re | 16 000 – 205 000 |
+
+The channel is a three-pass serpentine geometry (two 180° U-bends). All simulations use fixed thermal BCs: T_wall = 293.15 K, T_inlet = 329.0 K.
+
+---
+
+## Repository Structure
+
+```
+.
+├── src/
+│   ├── config.py           # shared constants: DP_CONFIGS, physics, geometry, HTC planes
+│   ├── models.py           # neural architectures: FFNN, NormalizedPINN, QPP_MLP
+│   ├── utils.py            # _Tee logger, build_mlp_input, all plot/table functions
+│   ├── run_pinn.py         # PINN training (multi-DP, W&B sweep compatible)
+│   ├── run_qpp_mlp.py      # QPP-MLP training (multi-DP, W&B sweep compatible)
+│   ├── infer_pinn.py       # PINN standalone inference with CFD ground-truth comparison
+│   ├── infer_qpp_mlp.py    # QPP-MLP standalone inference with CFD comparison
+│   ├── compute_htc.py      # HTC = q'' / (Tw - Tb) from pretrained PINN + MLP
+│   ├── preProcessedData/   # CFD data per DP (stl, vel, press, temp, htc)
+│   ├── pools/              # cached geometry sampling pools (auto-generated, see below)
+│   └── batch/              # SLURM batch scripts and W&B sweep configs
+│
+├── best_PINN/              # best trained PINN weights + normalization
+├── best_MLP/               # best trained QPP-MLP weights
+├── HTC_pred/               # HTC prediction outputs (plots, CSVs)
+├── logs/                   # SLURM stdout logs
+└── pinn27_sweep_runs/      # W&B sweep trial outputs
+    qpp_mlp_sweep_runs/
+```
+
+---
+
+## Models
+
+### PINN : Physics-Informed Neural Network
+
+Predicts the **5 volumetric flow fields** simultaneously from spatial coordinates and design parameters:
+
+- Output: (vx, vy, vz, p, T) : all non-dimensionalized
+- Input: (x, y, z) + 5 z-scored design params + 2 wall sigmoid features → 10D
+- Architecture: fully connected net with Sin activations (FFNN), wrapped in `NormalizedPINN` for automatic input/output normalization
+- Best config: h=128, 6 layers, trained on 10 000 collocation pts/DP
+
+The PDE residuals (incompressible NS + energy), inlet/outlet BCs, and wall BCs are all enforced as soft loss terms alongside supervised data from CFD snapshots.
+
+> **GPU note:** the PINN is float64 throughout. Training runs fine on CUDA, but running the trained PINN in float64 on the IZAR GPU at **inference** time causes numerical overflow (outputs blow up to values like `1e330` / NaN). Because of this, `run_pinn.py`'s post-training inference pass, `infer_pinn.py`, and the PINN forward pass in `compute_htc.py` all force the model onto CPU regardless of `--device`. The QPP-MLP is unaffected and runs on CUDA normally.
+
+### QPP-MLP : Wall Heat Flux Surrogate
+
+Predicts **q'' [W/m²]** at wall surface points from 2D wall coordinates and design parameters:
+
+- Output: q'' (scalar, normalized)
+- Input: (x, y) + 5 z-scored design params + 2 wall sigmoid features → 9D
+  - z is dropped: the bottom wall is nearly flat, so z carries no information
+- Architecture: fully connected net with Sin activations (QPP_MLP)
+- Best config: h=128, 8 layers, lr=5.94e-4, trained across all 51 DPs
+
+### HTC Computation
+
+The Heat Transfer Coefficient is assembled as:
+
+```
+HTC(x,y) = q''(x,y) / (T_wall - T_bulk(x,y))
+```
+
+where:
+- `q''` comes from the QPP-MLP
+- `T_bulk` is interpolated from PINN-predicted temperatures at 6 cross-sectional planes using linear (straight passes) and arcsin (bends) interpolation
+
+Normalised Nusselt number: `Nu_norm = HTC · Dh / (k_f · Nu_0)` with `Nu_0 = 0.023 Re^0.8 Pr^0.3`.
+
+---
+
+## Workflow
+
+```
+CFD data (npy)
+      │
+      ├──► run_pinn.py      → best_PINN/pinn_model.pt
+      │                              normalization.pt
+      │
+      ├──► run_qpp_mlp.py   → best_MLP/qpp_mlp_best.pt
+      │                              qpp_mlp_final.pt
+      │
+      └──► compute_htc.py ◄─── both models
+                   │
+                   └──► HTC_pred/  (plots, epsilon_table.csv,
+                                    Nu_section_table.csv)
+```
+
+---
+
+## Geometry Pools (Collocation Point Cache)
+
+For each DP, `run_pinn.py` samples volume and wall collocation points from the STL mesh and saves them to `src/pools/<dpXX>/pool_np<N>_fv<fv>_fw<fw>_wf<wf>_dh<dh>_dv<dv>.pt`. On subsequent runs : including all sweep trials : the file is loaded directly if it exists, skipping the expensive trimesh sampling step.
+
+The filename encodes all sampling parameters (`--n-pool`, `--pool-frac-vol`, `--pool-frac-wall`, wall fraction, horizontal/vertical deltas), so changing any of those automatically triggers a rebuild. This was key to making hyperparameter sweeps fast.
+
+---
+
+## Data Format
+
+Each DP folder (`preProcessedData/With_T/dpXX/`) contains:
+
+| File | Shape | Description |
+|------|-------|-------------|
+| `vel_x.npy` | (N, 4) | x, y, z, vx [m/s] |
+| `vel_y.npy` | (N, 4) | x, y, z, vy [m/s] |
+| `vel_z.npy` | (N, 4) | x, y, z, vz [m/s] |
+| `press.npy` | (N, 4) | x, y, z, p [Pa] |
+| `temp.npy` | (N, 4) | x, y, z, T [K] |
+| `vel_x_inlet.npy` | (M, 4) | inlet face vx (for V_IN) |
+| `qpp.npy` | (W, 4) | x, y, z, q'' [W/m²] : wall surface |
+| `*.stl` | : | geometry mesh (for collocation sampling) |
+
+The original CFD exports (`Vel_x_V_ribs_*.csv`, `Abs_p_V_ribs_*.csv`, `heat_flux_V_ribs_*.csv`, `Temp_V_ribs_*.csv`, `vel_x_inlet.csv`, …) are also present in each folder but are **not read by any script** : they were the source files used to generate the `.npy` files (via `preprocess.ipynb` / `preprocess_inference.py`) and are kept for reference only.
+
+The one exception: inference DPs (`preProcessedData/Inference/dpXX/`) contain `HTC{1-5}_V_dpXX.csv` which **are** read by `compute_htc.py` for ground-truth HTC comparison : these have no `.npy` equivalent.
+
+---
+
+## Running
+
+All scripts run from `src/` with `python <script>.py --args`.
+
+### Train PINN
+
+```bash
+python run_pinn.py \
+    --project    PINN27 \
+    --hidden-dim 128 \
+    --n-layers   6 \
+    --epochs     5000 \
+    --lr         3.6774e-3 \
+    --lr-end     1e-4 \
+    --n-train    10000 \
+    --n-sup      500 \
+    --run-path   ../best_PINN
+```
+
+### Train QPP-MLP
+
+```bash
+python run_qpp_mlp.py \
+    --project      QPP_MLP \
+    --hidden-dim   128 \
+    --n-layers     8 \
+    --lr           5.94e-4 \
+    --lr-end       3.46e-4 \
+    --weight-decay 1.32e-4 \
+    --epochs       1000 \
+    --patience     300 \
+    --run-path     ../best_MLP
+```
+
+### PINN Inference
+
+```bash
+python infer_pinn.py \
+    --run-path  ../best_PINN \
+    --dps       dp102 dp103 dp104 dp105 \
+    --data-root ./preProcessedData/Inference
+```
+
+### QPP-MLP Inference
+
+```bash
+python infer_qpp_mlp.py \
+    --checkpoint ../best_MLP/qpp_mlp_final.pt \
+    --data-dir   ./preProcessedData/Inference \
+    --dps        dp102 dp103 dp104 dp105
+```
+
+### Compute HTC
+
+```bash
+python compute_htc.py \
+    --pinn-path  ../best_PINN \
+    --mlp-ckpt   ../best_MLP/qpp_mlp_final.pt \
+    --data-dir   ./preProcessedData/Inference \
+    --dps        dp102 dp103 dp104 dp105 \
+    --out-dir    ../HTC_pred
+```
+
+---
+
+## SLURM (IZAR)
+
+All batch scripts are in `src/batch/`. Submit from the repo root or `src/`:
+
+```bash
+# Train PINN (best hyperparameters hardcoded)
+sbatch src/batch/run_pinn.batch
+
+# Train QPP-MLP
+sbatch src/batch/run_qpp_mlp.batch
+
+# Run PINN inference on test DPs
+sbatch src/batch/slurm_infer_pinn.batch
+
+# Run QPP-MLP inference
+sbatch src/batch/slurm_infer_qpp_mlp.batch
+
+# Compute HTC
+sbatch src/batch/slurm_compute_htc.batch
+```
+
+SLURM logs go to `logs/slurm_<jobid>.log`. Scripts that write their own log (training, HTC) also save a `training.log` / `compute_htc.log` in their output directory.
+
+### W&B Hyperparameter Sweeps
+
+```bash
+# PINN : create a sweep (once), then submit N parallel agents
+cd src
+wandb sweep batch/sweep_config.yaml                            # prints <SWEEP_ID>
+sbatch --export=ALL,SWEEP_ID=<SWEEP_ID> batch/run_pinn_sweep.batch
+
+# QPP-MLP : same pattern
+wandb sweep batch/sweep_config_qpp_mlp.yaml                    # prints <SWEEP_ID>
+sbatch --export=ALL,SWEEP_ID=<SWEEP_ID> batch/run_qpp_mlp_sweep.batch
+```
+
+Both sweep batch scripts are SLURM array jobs (`--array=1-20` by default); each array task runs one `wandb agent --count 1` trial. The PINN sweep (`sweep_config.yaml`) uses Bayesian optimization over hidden_dim, n_layers, n_train, epochs, lr, lr_decay_ratio, minimizing `loss/total`. The QPP-MLP sweep (`sweep_config_qpp_mlp.yaml`) sweeps hidden_dim, n_layers, lr, lr_end, weight_decay (epochs/patience fixed at 1000/300), minimizing `best_test_mse_nd`. Trial outputs land in `pinn27_sweep_runs/<sweep_id>/` and `qpp_mlp_sweep_runs/<sweep_id>/`.
+
+---
+
+## Environment
+
+Conda environment: `blade-cooling`
+
+| Package | Version |
+|---------|---------|
+| PyTorch | 2.5.1+cu118 |
+| NumPy | 2.0.2 |
+| trimesh | 4.5.3 |
+| wandb | 0.27.1 |
+| matplotlib | 3.9.3 |
+| scipy | 1.17.1 |
+
+Create it from [`environment.yml`](environment.yml):
+
+```bash
+conda env create -f environment.yml
+conda activate blade-cooling
+```
+
+---
+
+## Output Files
+
+| File | Location | Description |
+|------|----------|-------------|
+| `pinn_model.pt` | `best_PINN/` | PINN weights |
+| `normalization.pt` | `best_PINN/` | coord/output normalization stats |
+| `training.log` | `best_PINN/` or `best_MLP/` | full stdout log of training |
+| `qpp_mlp_best.pt` | `best_MLP/` | best checkpoint (early stopping) |
+| `qpp_mlp_final.pt` | `best_MLP/` | final epoch checkpoint |
+| `epsilon_table.csv` | `HTC_pred/` | ε_θ, ε_p, ε_vx, ε_Nu per DP |
+| `Nu_section_table.csv` | `HTC_pred/` | Nu_norm CFD vs PINN per section |
+| `compute_htc.log` | `HTC_pred/` | full stdout log of HTC computation |

@@ -7,9 +7,6 @@ import torch
 import torch.nn as nn
 import os
 import sys
-import io
-import matplotlib
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import time
 import wandb
@@ -17,93 +14,17 @@ from torch.optim import Adam
 
 torch.set_default_dtype(torch.float64)
 
-# ═══════════════════════════════════════════════════════════════
-# PHYSICAL CONSTANTS
-# ═══════════════════════════════════════════════════════════════
+from config import (
+    DP_CONFIGS,
+    PARAM_NAMES, PARAM_MEANS, PARAM_STDS,
+    WALL_Y1, WALL_Y2, WALL_EPS,
+    M, R, K, CP, T_REF_SUTH, MU_REF, S_SUTH,
+)
+from models import FFNN, NormalizedPINN
+from utils import _Tee, plot_fields
 
-M          = 28.96e-3
-R          = 8.314
-K          = 2.61e-2
-CP         = 1.00e3
-T_REF_SUTH = 278.15
-MU_REF     = 1.716e-5
-S_SUTH     = 110.4
-
-# Any DP with DELTA_T below this is rejected — pinn25 is non-isothermal only.
+# Any DP with DELTA_T below this is rejected — this pinn is non-isothermal only (otherwise, division by almost 0 in T z-normalization).
 ISOTHERMAL_DELTA_T_THRESHOLD = 5.0   # [K]
-
-# ═══════════════════════════════════════════════════════════════
-# PARAMETRIC INPUT NORMALIZATION  (anchors from the full 51-DP space)
-# ═══════════════════════════════════════════════════════════════
-
-PARAM_NAMES = ["AR",   "e/Dh",  "P/e",  "alpha",   "Re"    ]
-PARAM_MEANS = torch.tensor([ 9.0,   0.127,  10.0,   52.0,  108000.0], dtype=torch.float64)
-PARAM_STDS  = torch.tensor([ 3.5,   0.048,   3.1,   14.5,   58000.0], dtype=torch.float64)
-
-# Internal-wall sigmoid features — same y positions for ALL 50 DPs.
-WALL_Y1  = 0.185   # [m]
-WALL_Y2  = 0.375   # [m]
-WALL_EPS = 0.002    # [m] sigmoid width
-
-# ═══════════════════════════════════════════════════════════════
-# DESIGN-POINT REGISTRY  (DP0–DP50, all inline)
-# ═══════════════════════════════════════════════════════════════
-# outlet_y_min_frac / inlet_y_max_frac: None = use CLI defaults.
-# Set explicitly for geometries where you know the internal wall position.
-
-DP_CONFIGS = [
-    {"folder": "dp00", "ar":  7.5,      "e_dh": 0.074,    "p_e":  8.0,      "alpha": 60.0,     "re": 100000.0 },
-    {"folder": "dp01", "ar":  3.644728, "e_dh": 0.049743, "p_e":  4.7724,   "alpha": 25.41772, "re":  16278.05},
-    {"folder": "dp02", "ar":  3.890253, "e_dh": 0.046589, "p_e":  4.984645, "alpha": 28.74614, "re":  19457.92},
-    {"folder": "dp03", "ar":  9.002429, "e_dh": 0.18974,  "p_e":  6.423034, "alpha": 74.29562, "re":  33203.83},
-    {"folder": "dp04", "ar": 14.2659,   "e_dh": 0.094117, "p_e": 11.94046,  "alpha": 54.08848, "re": 171579.3 },
-    {"folder": "dp05", "ar":  5.67934,  "e_dh": 0.151972, "p_e": 12.38583,  "alpha": 73.44649, "re": 164877.9 },
-    {"folder": "dp06", "ar":  6.027419, "e_dh": 0.18568,  "p_e":  8.921497, "alpha": 59.02505, "re": 121107.7 },
-    {"folder": "dp07", "ar": 10.98555,  "e_dh": 0.101665, "p_e":  8.443827, "alpha": 41.87127, "re":  24717.01},
-    {"folder": "dp08", "ar": 12.29549,  "e_dh": 0.078886, "p_e":  5.449208, "alpha": 35.0332,  "re": 196382.7 },
-    {"folder": "dp09", "ar":  8.515138, "e_dh": 0.069877, "p_e":  8.861573, "alpha": 36.31164, "re":  76870.97},
-    {"folder": "dp10", "ar": 14.40566,  "e_dh": 0.15972,  "p_e":  8.679227, "alpha": 65.17492, "re": 189773.0 },
-    {"folder": "dp11", "ar":  4.378955, "e_dh": 0.140784, "p_e":  8.114662, "alpha": 37.30411, "re": 112306.8 },
-    {"folder": "dp12", "ar":  7.607081, "e_dh": 0.122157, "p_e": 14.1121,   "alpha": 40.9318,  "re":  35772.6 },
-    {"folder": "dp13", "ar": 10.89665,  "e_dh": 0.164771, "p_e": 11.72562,  "alpha": 46.07647, "re":  48748.35},
-    {"folder": "dp14", "ar":  4.668702, "e_dh": 0.083476, "p_e":  9.196702, "alpha": 44.45944, "re":  95242.31},
-    {"folder": "dp15", "ar":  5.398892, "e_dh": 0.097308, "p_e": 11.52129,  "alpha": 51.20543, "re": 124027.6 },
-    {"folder": "dp16", "ar":  6.640551, "e_dh": 0.156298, "p_e": 11.27025,  "alpha": 34.82768, "re": 101590.6 },
-    {"folder": "dp17", "ar": 12.90792,  "e_dh": 0.125448, "p_e": 14.94032,  "alpha": 38.43865, "re":  21978.75},
-    {"folder": "dp18", "ar": 13.75498,  "e_dh": 0.121149, "p_e": 12.54017,  "alpha": 61.05144, "re": 153635.5 },
-    {"folder": "dp19", "ar":  4.079941, "e_dh": 0.086112, "p_e": 12.01869,  "alpha": 65.94071, "re":  87782.58},
-    {"folder": "dp20", "ar":  7.056191, "e_dh": 0.148406, "p_e": 13.78874,  "alpha": 45.18996, "re": 143472.5 },
-    {"folder": "dp21", "ar":  9.87082,  "e_dh": 0.168413, "p_e":  5.105393, "alpha": 43.60288, "re":  61098.39},
-    {"folder": "dp22", "ar": 14.77513,  "e_dh": 0.061514, "p_e": 10.96145,  "alpha": 69.06866, "re": 140693.4 },
-    {"folder": "dp23", "ar": 14.62171,  "e_dh": 0.073192, "p_e": 14.56414,  "alpha": 63.4404,  "re": 107269.2 },
-    {"folder": "dp24", "ar": 10.4212,   "e_dh": 0.131579, "p_e": 10.35821,  "alpha": 47.54174, "re": 148329.5 },
-    {"folder": "dp25", "ar": 13.89294,  "e_dh": 0.196634, "p_e":  5.968536, "alpha": 40.4697,  "re":  64305.93},
-    {"folder": "dp26", "ar":  8.260275, "e_dh": 0.106006, "p_e": 10.63216,  "alpha": 31.18607, "re": 183860.6 },
-    {"folder": "dp27", "ar":  6.610613, "e_dh": 0.090241, "p_e":  7.549495, "alpha": 71.61877, "re":  56800.33},
-    {"folder": "dp28", "ar":  9.687974, "e_dh": 0.068103, "p_e":  9.436798, "alpha": 48.67483, "re":  44366.84},
-    {"folder": "dp29", "ar":  9.374113, "e_dh": 0.064434, "p_e":  6.303342, "alpha": 59.78739, "re": 158601.6 },
-    {"folder": "dp30", "ar":  7.427527, "e_dh": 0.145224, "p_e":  6.949837, "alpha": 56.97142, "re": 185584.6 },
-    {"folder": "dp31", "ar": 13.21633,  "e_dh": 0.178371, "p_e": 12.96159,  "alpha": 67.7618,  "re":  80936.64},
-    {"folder": "dp32", "ar": 12.7963,   "e_dh": 0.109381, "p_e":  8.007497, "alpha": 39.72069, "re": 132395.1 },
-    {"folder": "dp33", "ar": 10.64298,  "e_dh": 0.115023, "p_e":  9.933429, "alpha": 33.21242, "re":  39651.15},
-    {"folder": "dp34", "ar": 11.43933,  "e_dh": 0.058513, "p_e": 10.1587,   "alpha": 32.23051, "re":  82745.98},
-    {"folder": "dp35", "ar":  7.275716, "e_dh": 0.117108, "p_e":  5.367998, "alpha": 30.2532,  "re": 177585.9 },
-    {"folder": "dp36", "ar":  5.135855, "e_dh": 0.191313, "p_e": 13.56869,  "alpha": 61.60822, "re": 150207.4 },
-    {"folder": "dp37", "ar":  5.459505, "e_dh": 0.054453, "p_e":  9.665539, "alpha": 53.22351, "re": 115302.3 },
-    {"folder": "dp38", "ar": 11.38441,  "e_dh": 0.079722, "p_e": 14.61072,  "alpha": 70.09904, "re":  94011.89},
-    {"folder": "dp39", "ar":  7.906148, "e_dh": 0.171919, "p_e": 10.78854,  "alpha": 48.24447, "re":  68803.85},
-    {"folder": "dp40", "ar": 10.13908,  "e_dh": 0.051254, "p_e": 13.31478,  "alpha": 66.29723, "re":  71450.48},
-    {"folder": "dp41", "ar": 12.53072,  "e_dh": 0.128661, "p_e":  7.684222, "alpha": 62.53379, "re": 163960.9 },
-    {"folder": "dp42", "ar": 11.69391,  "e_dh": 0.174673, "p_e":  6.619144, "alpha": 70.79936, "re": 102851.9 },
-    {"folder": "dp43", "ar": 11.99886,  "e_dh": 0.197554, "p_e":  6.98893,  "alpha": 55.25445, "re": 175714.0 },
-    {"folder": "dp44", "ar":  4.802336, "e_dh": 0.137666, "p_e":  5.77712,  "alpha": 50.38406, "re": 127704.6 },
-    {"folder": "dp45", "ar":  6.189208, "e_dh": 0.18303,  "p_e":  7.266435, "alpha": 56.3389,  "re":  54043.76},
-    {"folder": "dp46", "ar":  8.640326, "e_dh": 0.144186, "p_e": 13.09386,  "alpha": 57.94209, "re":  30389.25},
-    {"folder": "dp47", "ar": 13.48607,  "e_dh": 0.161387, "p_e": 12.7088,   "alpha": 52.23429, "re": 192455.8 },
-    {"folder": "dp48", "ar":  9.210315, "e_dh": 0.104191, "p_e": 14.13385,  "alpha": 72.81153, "re": 137273.4 },
-    {"folder": "dp49", "ar": 15.06195,  "e_dh": 0.202031, "p_e": 15.16555,  "alpha": 77.84987, "re": 204946.7 },
-    {"folder": "dp50", "ar": 15.45474,  "e_dh": 0.204572, "p_e": 15.07501,  "alpha": 75.50823, "re": 202176.8 },
-]
 
 # ═══════════════════════════════════════════════════════════════
 # GEOMETRY SAMPLING  (labels: 0=interior, 1=inlet, 2=outlet, 3=wall)
@@ -182,7 +103,7 @@ def sample_collocation(vol_pool, wall_pool, n_vol, n_wall):
 # ═══════════════════════════════════════════════════════════════
 
 def dynamic_viscosity_tilde(T_tilde, delta_t, t_wall):
-    """mu/MU_REF given dimensionless T̃ and per-DP DELTA_T, T_WALL."""
+    """mu/MU_REF given dimensionless T* and per-DP DELTA_T, T_WALL."""
     T_K = T_tilde * delta_t + t_wall
     mu  = MU_REF * (T_K.abs() / T_REF_SUTH) ** 1.5 * (T_REF_SUTH + S_SUTH) / (T_K.abs() + S_SUTH)
     return mu / MU_REF
@@ -288,109 +209,8 @@ def compute_losses(
 
 
 # ═══════════════════════════════════════════════════════════════
-# MODEL
+# PLOTTING  (geometry/BC/volume pool visualization — training-specific)
 # ═══════════════════════════════════════════════════════════════
-
-class Sin(nn.Module):
-    def forward(self, x):
-        return torch.sin(x)
-
-
-class FFNN(nn.Module):
-    def __init__(self, in_dim, hidden_dim, out_dim, n_layers):
-        super().__init__()
-        layers = []
-        for i in range(n_layers - 1):
-            layers += [nn.Linear(in_dim if i == 0 else hidden_dim, hidden_dim), Sin()]
-        layers.append(nn.Linear(hidden_dim, out_dim))
-        self.net = nn.Sequential(*layers)
-        for lin in [m for m in self.net if isinstance(m, nn.Linear)]:
-            nn.init.xavier_normal_(lin.weight)
-            nn.init.zeros_(lin.bias)
-
-    def forward(self, x):
-        return self.net(x)
-
-
-class NormalizedPINN(nn.Module):
-    """Z-scores inputs; un-standardizes outputs.
-    Input layout: [x, y, z, AR_nd, EDH_nd, PE_nd, ALPHA_nd, RE_nd, s1, s2]  (10 dims).
-    s1, s2 are sigmoid wall-distance features computed from x[:,1] (physical y).
-    coord_mean/coord_std cover all 10 dims.
-    """
-    def __init__(self, net, coord_mean, coord_std, out_mean, out_std):
-        super().__init__()
-        self.net = net
-        self.register_buffer("coord_mean", coord_mean)
-        self.register_buffer("coord_std",  coord_std)
-        self.register_buffer("out_mean",   out_mean)
-        self.register_buffer("out_std",    out_std)
-
-    def forward(self, x):
-        # x[:,1] is physical y — append wall sigmoid features before z-scoring
-        y   = x[:, 1:2]
-        s1  = torch.sigmoid((y - WALL_Y1) / WALL_EPS)
-        s2  = torch.sigmoid((y - WALL_Y2) / WALL_EPS)
-        x   = torch.cat([x, s1, s2], dim=1)
-        x_norm   = (x - self.coord_mean) / self.coord_std
-        y_norm   = self.net(x_norm)
-        safe_std = torch.where(self.out_std == 0, torch.ones_like(self.out_std), self.out_std)
-        return y_norm * safe_std + self.out_mean
-
-
-# ═══════════════════════════════════════════════════════════════
-# PLOTTING
-# ═══════════════════════════════════════════════════════════════
-
-def plot_fields(pts, fields, output_dir, tag="", slice_frac=0.10):
-    os.makedirs(output_dir, exist_ok=True)
-
-    def to_np(x):
-        if x is None: return None
-        return x.detach().cpu().numpy() if isinstance(x, torch.Tensor) else np.asarray(x)
-
-    pts_np = to_np(pts)
-    ranges = pts_np.max(axis=0) - pts_np.min(axis=0)
-    box_aspect = (ranges / ranges.max()).tolist()
-    z_vals = pts_np[:, 2]
-    z_mid  = 0.5 * (z_vals.min() + z_vals.max())
-    z_tol  = slice_frac * (z_vals.max() - z_vals.min())
-    cut_mask  = np.abs(z_vals - z_mid) < z_tol
-    p_cut     = pts_np[cut_mask]
-    cut_label = f"x-y  z={z_mid*1000:.1f}mm  (n={cut_mask.sum()})"
-
-    for name, data_raw, pred_raw in fields:
-        data, pred = to_np(data_raw), to_np(pred_raw)
-        has_data   = data is not None
-        vmin = float(min(data.min(), pred.min()) if has_data else pred.min())
-        vmax = float(max(data.max(), pred.max()) if has_data else pred.max())
-
-        subplots = []
-        if has_data: subplots.append((f"Data – {name}", data,        vmin, vmax))
-        subplots.append(             (f"Pred – {name}", pred,        vmin, vmax))
-        if has_data: subplots.append((f"Diff – {name}", data - pred, None, None))
-
-        n_sub = len(subplots)
-        fig   = plt.figure(figsize=(6 * n_sub, 10))
-        for i, (title, color, cmin, cmax) in enumerate(subplots):
-            ax = fig.add_subplot(2, n_sub, i + 1, projection="3d")
-            sc = ax.scatter(pts_np[:,0], pts_np[:,1], pts_np[:,2],
-                            c=color, cmap="viridis", vmin=cmin, vmax=cmax, s=1, rasterized=True)
-            ax.set_box_aspect(box_aspect); ax.set_title(title, fontsize=10)
-            ax.set_xlabel("X"); ax.set_yticklabels([]); ax.set_zticklabels([])
-            plt.colorbar(sc, ax=ax, shrink=0.5, label=name)
-        for i, (title, color, cmin, cmax) in enumerate(subplots):
-            ax  = fig.add_subplot(2, n_sub, n_sub + i + 1)
-            sc  = ax.scatter(p_cut[:,0], p_cut[:,1], c=color[cut_mask],
-                             cmap="viridis", vmin=cmin, vmax=cmax, s=4, rasterized=True)
-            ax.set_xlabel("x [m]"); ax.set_ylabel("y [m]"); ax.set_aspect("equal")
-            ax.set_title(f"{title}\n{cut_label}", fontsize=9)
-            plt.colorbar(sc, ax=ax, label=name, shrink=0.5, aspect=15)
-        fig.tight_layout()
-        fig.savefig(os.path.join(output_dir, f"{name}{'_'+tag if tag else ''}.png"),
-                    dpi=120, bbox_inches="tight")
-        plt.close(fig)
-
 
 def plot_point_clouds(title, path, datasets, wall_ys=None, unit="m"):
     fig = plt.figure(figsize=(18, 5))
@@ -648,7 +468,7 @@ def load_dp(cfg, args):
                              f"pool_np{N_TOTAL_POOL}_fv{POOL_FRAC_VOL}_fw{POOL_FRAC_WALL}"
                              f"_wf{WALL_FRACTION}_dh{DELTA_HORIZ_MM}_dv{DELTA_VERT_MM}.pt")
 
-    if os.path.exists(pool_path): ### will need less memory if just need to load
+    if os.path.exists(pool_path):
         print(f"    Loading pools from cache: {os.path.basename(pool_path)}")
         _saved    = torch.load(pool_path, weights_only=True, map_location='cpu')
         vol_pool  = _saved["vol_pool"]
@@ -815,10 +635,8 @@ if dp_filter:
         raise ValueError(f"Unknown DP(s) in --dps: {sorted(unknown)}. "
                          f"Valid names: {[c['folder'] for c in DP_CONFIGS]}")
 
-# ── IS_SWEEP — detect early so RUN_PATH can be set correctly ──
 IS_SWEEP = bool(os.environ.get("WANDB_SWEEP_ID"))
 
-# ── RUN_PATH and logging — set up before data loading so all output is captured ──
 if args.run_path:
     RUN_PATH = args.run_path
 elif IS_SWEEP:
@@ -839,15 +657,6 @@ else:
 os.makedirs(RUN_PATH, exist_ok=True)
 
 _log_path = os.path.join(RUN_PATH, "training.log")
-
-class _Tee(io.TextIOBase):
-    def __init__(self, stream, logfile):
-        self._stream = stream; self._logfile = logfile
-    def write(self, s):
-        self._stream.write(s); self._logfile.write(s); return len(s)
-    def flush(self):
-        self._stream.flush(); self._logfile.flush()
-
 _log_handle = open(_log_path, "w", buffering=1, encoding="utf-8")
 sys.stdout  = _Tee(sys.__stdout__,  _log_handle)
 sys.stderr  = _Tee(sys.__stderr__,  _log_handle)
@@ -1280,6 +1089,7 @@ torch.save({
 # INFERENCE  (CPU, full domain, per DP)
 # ═══════════════════════════════════════════════════════════════
 
+# PINN must run on CPU — float64 CUDA causes overflow/NaN on IZAR GPU
 torch.set_default_device("cpu")
 net_inf   = FFNN(in_dim=IN_DIM, hidden_dim=HIDDEN_DIM, out_dim=5, n_layers=N_LAYERS)
 model_inf = NormalizedPINN(net_inf,
