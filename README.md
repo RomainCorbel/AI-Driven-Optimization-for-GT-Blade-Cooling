@@ -18,7 +18,7 @@ The surrogate models are trained over a parametric space of **55 design points**
 | Rib attack angle | α [°] | 30 – 75 |
 | Reynolds number | Re | 20 000 – 200 000 |
 
-The channel is a three-pass serpentine geometry (two 180° U-bends). All simulations use fixed thermal BCs: T_wall = 293.15 K, T_inlet = 329.0 K.
+The channel is a three-pass serpentine geometry (two 180° U-bends). 
 
 ---
 
