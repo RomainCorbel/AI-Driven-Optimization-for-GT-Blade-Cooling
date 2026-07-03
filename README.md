@@ -12,11 +12,11 @@ The surrogate models are trained over a parametric space of **55 design points**
 
 | Parameter | Symbol | Range |
 |-----------|--------|-------|
-| Aspect ratio | AR | 3.6 – 15.5 |
-| Rib height-to-hydraulic diameter | e/Dh | 0.046 – 0.205 |
-| Rib pitch-to-height | P/e | 4.8 – 15.2 |
-| Rib attack angle | α [°] | 25 – 78 |
-| Reynolds number | Re | 16 000 – 205 000 |
+| Aspect ratio | AR | 4 – 15 |
+| Rib height-to-hydraulic diameter | e/Dh [%] | 5 – 20 |
+| Rib pitch-to-height | P/e | 5 – 15 |
+| Rib attack angle | α [°] | 30 – 75 |
+| Reynolds number | Re | 20 000 – 200 000 |
 
 The channel is a three-pass serpentine geometry (two 180° U-bends). All simulations use fixed thermal BCs: T_wall = 293.15 K, T_inlet = 329.0 K.
 
