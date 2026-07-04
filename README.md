@@ -51,8 +51,10 @@ The channel is a three-pass serpentine geometry (two 180° U-bends).
 ├── isothermal_PINN_no_sup/        # isothermal benchmark, trained with physics loss only (no CFD supervision)
 ├── HTC_pred/               # HTC prediction outputs (plots, CSVs)
 ├── logs/                   # SLURM stdout logs
-└── pinn27_sweep_runs/      # W&B sweep trial outputs
-    qpp_mlp_sweep_runs/
+├── pinn27_sweep_runs/      # W&B sweep trial outputs
+│   qpp_mlp_sweep_runs/
+├── Report_LAMD_Corbel.pdf         # full write-up
+└── Slide_LAMD_Corbel.pdf          # presentation slides
 ```
 
 ---
