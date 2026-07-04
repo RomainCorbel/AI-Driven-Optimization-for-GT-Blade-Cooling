@@ -1,0 +1,37 @@
+#!/bin/bash -l
+
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=1
+#SBATCH --time=04:00:00
+#SBATCH --gres=gpu:1
+#SBATCH --mem=32G
+#SBATCH --output=/scratch/izar/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/logs/slurm_isothermal_no_sup_%j.log
+
+module load gcc/11.3.0
+module load intel/2021.6.0
+module load nvhpc/23.3-mpi
+module load cuda/11.8.0
+
+source /home/corbel/miniconda3/etc/profile.d/conda.sh
+conda activate blade-cooling
+cd /scratch/izar/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/src
+
+# Pure-physics run: --n-sup 0 disables the supervised CFD loss entirely (the model
+# never sees ground-truth vx/vy/vz/p/T values), so only the PDE + BC terms train it.
+# --n-train (collocation/BC point count) is unchanged from run_pinn_isothermal.batch —
+# it must stay nonzero, since it also sizes the inlet/outlet/wall batches.
+srun python run_pinn_isothermal.py \
+    --project    PINN_isothermal_no_sup \
+    --hidden-dim 20 \
+    --n-layers   4 \
+    --epochs     6000 \
+    --lr         3e-3 \
+    --lr-end     1e-4 \
+    --n-train    5000 \
+    --n-sup      0 \
+    --n-test     10000 \
+    --seed       42 \
+    --w-pde      1.0 \
+    --w-bc       1.0 \
+    --run-path   /scratch/izar/corbel/AI-Driven-Optimization-for-GT-Blade-Cooling/isothermal_PINN_no_sup
